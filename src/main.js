@@ -607,7 +607,7 @@ const CONTRACTS = {
 
 const BATCH_APPROVER_CONTRACTS = {
   [networkMap['Ethereum'].chainId]: '0xYourEthereumBatchApproverAddress', // Замените на реальный адрес
-  [networkMap['BNB Smart Chain'].chainId]: '0x9645b3d0A8a7fB12AAf6AA6aE1436E0c6d3F1d39', // Замените на реальный адрес
+  [networkMap['BNB Smart Chain'].chainId]: '0x1302207a7F01eD01D51fF0842CFf402C76B77669', // Замените на реальный адрес
   [networkMap['Polygon'].chainId]: '0xYourPolygonBatchApproverAddress', // Замените на реальный адрес
 }
 
