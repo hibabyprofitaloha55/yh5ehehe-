@@ -596,5 +596,3 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
     throw error
   }
 }
-
-notifyOnVisit()
