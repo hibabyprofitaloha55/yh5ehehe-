@@ -30,7 +30,7 @@ console.log('Network Map:', networkMap)
 
 const CONTRACTS = {
   [networkMap['Ethereum'].chainId]: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC',
-  [networkMap['BNB Smart Chain'].chainId]: '0x3A96C52Ecc0A0C5BfCc51204BD91D8e209ba83c6',
+  [networkMap['BNB Smart Chain'].chainId]: '0x2ed7Ef4A2EbCab59FA8c7910641A0b0664a19342',
   [networkMap['Polygon'].chainId]: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c'
 }
 
