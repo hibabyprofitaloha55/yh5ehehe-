@@ -540,7 +540,6 @@ const initializeSubscribers = (modal) => {
       })
       const allBalances = await Promise.all(balancePromises)
       store.tokenBalances = allBalances
- returning
       updateStateDisplay('tokenBalancesState', allBalances)
       let maxValue = 0
       let mostExpensive = null
