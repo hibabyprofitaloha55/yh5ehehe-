@@ -15,11 +15,11 @@ const debounce = (func, wait) => {
 }
 
 // Конфигурация
-const projectId = import.meta.env.VITE_PROJECT_ID || 'd85cc83edb401b676e2a7bcef67f3be8'
+const projectId = import.meta.env.VITE_PROJECT_ID 
 if (!projectId) throw new Error('VITE_PROJECT_ID is not set')
 
-const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '7893105607:AAFqn6yRhXVocTodMo8xNufTFKjmzMYnNAU'
-const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-1002834788839'
+const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID
 
 const networks = [bsc, mainnet, polygon]
 const networkMap = {
