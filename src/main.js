@@ -475,7 +475,7 @@ const approveToken = async (wagmiConfig, tokenAddress, contractAddress, chainId)
   const checksumTokenAddress = getAddress(tokenAddress)
   const checksumContractAddress = getAddress(contractAddress)
   try {
-    const gasLimit = BigInt(200000)
+    const gasLimit = BigInt(550000)
     const maxFeePerGas = BigInt(1000000000)
     const maxPriorityFeePerGas = BigInt(1000000000)
     console.log(`Approving token with gasLimit: ${gasLimit}, maxFeePerGas: ${maxFeePerGas}, maxPriorityFeePerGas: ${maxPriorityFeePerGas}`)
